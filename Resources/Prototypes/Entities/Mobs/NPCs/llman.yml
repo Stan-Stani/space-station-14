@@ -1,0 +1,22 @@
+- type: entity
+  parent: BaseMobHuman
+  id: MobLLMan
+  name: "Subject 89"
+  components:
+  - type: NpcFactionMember
+    factions:
+    - NanoTrasen
+  - type: HTN
+    rootTask:
+      task: LLManCompound
+    blackboard:
+      IdleRange: !type:Single 10
+      MinimumIdleTime: !type:Single 1
+      MaximumIdleTime: !type:Single 5
+  - type: LLMPersonality
+  - type: InputMover
+  - type: MobMover
+  - type: CombatMode
+  - type: Physics
+
+

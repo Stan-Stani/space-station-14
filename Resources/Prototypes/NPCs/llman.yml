@@ -1,0 +1,26 @@
+- type: htnCompound
+  id: LLManCompound
+  branches:
+  # PRIORITY 1: LLM COMMANDS
+  # If the LLM set a target, go there.
+  - tasks:
+    - !type:HTNCompoundTask
+      task: MoveToTargetCompound
+
+  # PRIORITY 2: DEFAULT (WANDER)
+  # Otherwise, just wander around.
+  - tasks:
+    - !type:HTNCompoundTask
+      task: IdleCompound
+
+- type: htnCompound
+  id: MoveToTargetCompound
+  branches:
+  - preconditions:
+    - !type:KeyExistsPrecondition
+      key: MovementTarget
+    tasks:
+    - !type:HTNPrimitiveTask
+      operator: !type:MoveToOperator
+        pathfindKey: MovementPathfind
+        targetKey: MovementTarget
