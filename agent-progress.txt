@@ -36,3 +36,14 @@ Notes: Verified LLMService basic implementation. Identified missing features: Co
   - Removed erroneous ChatClientOptions code.
   - Verified build success for Content.Server.
 - **Outcome**: Server builds successfully. Azure Auth confirmed working by user.
+
+## Session: Implementing LLM Memory
+- **Date**: 2025-12-12
+- **Objective**: Implement conversation memory for LLM-powered NPCs.
+- **Actions**:
+  - Modified `Content.Server/LLM/LLMPersonalityComponent.cs` to store `History`.
+  - Updated `Content.Server/LLM/LLMService.cs` to accept `List<ChatMessage>`.
+  - Refactored `Content.Server/LLM/LLMPersonalitySystem.cs` to use `LLMService` and manage history context.
+  - Created `llm_memory_test` command for verification.
+  - Restarted server with `--config-file server_config.toml` to ensure credentials loaded.
+- **Outcome**: `llm_memory_test` verified successful context retention. LLM accurately recalled user name from conversation history.

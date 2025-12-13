@@ -28,7 +28,17 @@ public sealed class LLMService : ILLMService, IPostInjectInit
         _sawmill = _logManager.GetSawmill("llm");
     }
 
-    public async Task<string> GenerateResponseAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
+    public Task<string> GenerateResponseAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
+    {
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(systemPrompt),
+            new UserChatMessage(userPrompt)
+        };
+        return GenerateResponseAsync(messages, cancellationToken);
+    }
+
+    public async Task<string> GenerateResponseAsync(List<ChatMessage> messages, CancellationToken cancellationToken = default)
     {
         var apiUrl = _cfg.GetCVar(CCVars.LLMApiUrl);
         var apiKey = _cfg.GetCVar(CCVars.LLMApiKey);
@@ -42,57 +52,7 @@ public sealed class LLMService : ILLMService, IPostInjectInit
 
         try
         {
-            ChatClient client;
-
-            // Basic detection for Azure OpenAI
-            if (apiUrl.Contains("azure.com", StringComparison.OrdinalIgnoreCase))
-            {
-                // Parse the base URI for Azure (scheme + host).
-                // AzureOpenAIClient expects "https://myresource.openai.azure.com/"
-                // User might provide "https://myresource.openai.azure.com/openai/v1/..."
-                var uri = new Uri(apiUrl);
-                var baseUri = new Uri($"{uri.Scheme}://{uri.Host}");
-
-                AzureOpenAIClient azureClient;
-
-                if (!string.IsNullOrEmpty(apiKey) && apiKey != "dummy")
-                {
-                    // Use API Key if provided and valid
-                    azureClient = new AzureOpenAIClient(baseUri, new ApiKeyCredential(apiKey));
-                }
-                else
-                {
-                    // Fallback to Identity
-                    azureClient = new AzureOpenAIClient(baseUri, new DefaultAzureCredential());
-                }
-
-                // In Azure, 'model' CVar should correspond to the Deployment Name.
-                client = azureClient.GetChatClient(model);
-            }
-            else
-            {
-                // Standard OpenAI / Ollama
-
-                // If using a custom endpoint (like Ollama), passing the full URI including /v1 might be safer if the client respects it,
-                // but usually ChatClient expects the *Endpoint* property in options?
-                // Actually, for standard OpenAI, new ChatClient(model, key, options) defaults to OpenAI public API.
-                // We need to set the endpoint if it's not OpenAI. public.
-
-                var keyToUse = string.IsNullOrEmpty(apiKey) ? "dummy-key" : apiKey;
-
-                OpenAIClientOptions clientOptions = new OpenAIClientOptions
-                {
-                    Endpoint = new Uri(apiUrl)
-                };
-
-                client = new ChatClient(model, new ApiKeyCredential(keyToUse), clientOptions);
-            }
-
-            var messages = new List<ChatMessage>
-            {
-                new SystemChatMessage(systemPrompt),
-                new UserChatMessage(userPrompt)
-            };
+            var client = CreateClient(apiUrl, apiKey, model);
 
             ChatCompletion completion = await client.CompleteChatAsync(messages, cancellationToken: cancellationToken);
 
@@ -107,6 +67,45 @@ public sealed class LLMService : ILLMService, IPostInjectInit
         {
             _sawmill.Error($"Exception during LLM request: {e.Message}");
             return string.Empty;
+        }
+    }
+
+    private ChatClient CreateClient(string apiUrl, string apiKey, string model)
+    {
+        // Basic detection for Azure OpenAI
+        if (apiUrl.Contains("azure.com", StringComparison.OrdinalIgnoreCase))
+        {
+            // Parse the base URI for Azure (scheme + host).
+            var uri = new Uri(apiUrl);
+            var baseUri = new Uri($"{uri.Scheme}://{uri.Host}");
+
+            AzureOpenAIClient azureClient;
+
+            if (!string.IsNullOrEmpty(apiKey) && apiKey != "dummy")
+            {
+                // Use API Key if provided and valid
+                azureClient = new AzureOpenAIClient(baseUri, new ApiKeyCredential(apiKey));
+            }
+            else
+            {
+                // Fallback to Identity
+                azureClient = new AzureOpenAIClient(baseUri, new DefaultAzureCredential());
+            }
+
+            // In Azure, 'model' CVar should correspond to the Deployment Name.
+            return azureClient.GetChatClient(model);
+        }
+        else
+        {
+            // Standard OpenAI / Ollama
+            var keyToUse = string.IsNullOrEmpty(apiKey) ? "dummy-key" : apiKey;
+
+            OpenAIClientOptions clientOptions = new OpenAIClientOptions
+            {
+                Endpoint = new Uri(apiUrl)
+            };
+
+            return new ChatClient(model, new ApiKeyCredential(keyToUse), clientOptions);
         }
     }
 

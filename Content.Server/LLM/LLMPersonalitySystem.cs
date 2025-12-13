@@ -5,6 +5,7 @@ using Content.Server.NPC.Systems;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Robust.Shared.Asynchronous;
+using OpenAI.Chat;
 
 namespace Content.Server.LLM;
 
@@ -14,11 +15,11 @@ public sealed class LLMPersonalitySystem : EntitySystem
     [Dependency] private readonly NPCSystem _npc = default!;
     [Dependency] private readonly HTNSystem _htn = default!;
     [Dependency] private readonly ITaskManager _taskManager = default!;
+    [Dependency] private readonly ILLMService _llmService = default!;
 
     // 1. Define the timer variables
     private float _accumulatedTime = 0f;
     private const float UpdateInterval = 5.0f; // Run every 5 seconds
-    private static readonly HttpClient HttpClient = new HttpClient();
 
     public override void Update(float frameTime)
     {
@@ -58,61 +59,47 @@ public sealed class LLMPersonalitySystem : EntitySystem
                 ? "I can see: " + string.Join(", ", visibleEntities)
                 : "I can see nothing.";
 
-            // 2. Send to LLM endpoint
-            // We fire and forget this async task to avoid blocking the game loop
-            // In a real production system, you'd want a proper job queue.
-            ProcessLLMDecision(uid, status, visionText);
+            // 2. Clone history for async use (Snapshot)
+            var historySnapshot = new List<LLMPersonalityComponent.PersonalityChatMessage>(personality.History);
+
+            // 3. Send to LLM endpoint
+            ProcessLLMDecision(uid, status, visionText, historySnapshot);
         }
     }
 
-    private async void ProcessLLMDecision(EntityUid uid, string status, string vision)
+    private async void ProcessLLMDecision(EntityUid uid, string status, string vision, List<LLMPersonalityComponent.PersonalityChatMessage> history)
     {
         try
         {
-            var prompt = $@"
+            var systemPrompt = @"
 You are an NPC in Space Station 14.
-Status: {status}
-Vision: {vision}
 Your goal is to survive and satisfy your needs.
 Available Commands:
 - NOOP
 - MOVE <TargetID> (e.g., MOVE 123)
-
 Respond with ONLY the command.
 ";
+            var userPrompt = $@"
+Status: {status}
+Vision: {vision}
+";
 
-            // Mocking the request for now to avoid actual external dependency errors
-            // until user confirms they have an endpoint running.
-            // For now, let's just pick a random visible entity to move to if we are hungry.
-
-            // In the future:
-            // var content = new StringContent(JsonSerializer.Serialize(new { prompt = prompt }));
-            // var response = await HttpClient.PostAsync("http://localhost:5000/v1/chat/completions", content);
-
-            // Simulate processing delay
-            await Task.Delay(100);
-
-            // Mock logic: If we see something, move to the first thing we see.
-            // This proves the pipeline works.
-            string responseCommand = "NOOP";
-
-            // Simple heuristic to verify the system works:
-            // If the prompt contains "MOVE_TEST", we assume the LLM said it.
-            // Parsing the prompt itself is silly but efficient for a 'mock'.
-            // Actually, let's parse the 'Vision' string we passed in to find a valid ID.
-            if (vision.Contains("(ID: "))
+            // Build full message chain
+            var messages = new List<ChatMessage>
             {
-                // extract ID
-                var parts = vision.Split("(ID: ");
-                if (parts.Length > 1)
-                {
-                    var idPart = parts[1].Split(")")[0].Trim();
-                     if (int.TryParse(idPart, out int targetId))
-                     {
-                         responseCommand = $"MOVE {targetId}";
-                     }
-                }
+                new SystemChatMessage(systemPrompt)
+            };
+
+            foreach (var msg in history)
+            {
+                if (msg.Role == "user") messages.Add(new UserChatMessage(msg.Content));
+                else if (msg.Role == "assistant") messages.Add(new AssistantChatMessage(msg.Content));
             }
+
+            messages.Add(new UserChatMessage(userPrompt));
+
+            // Call Service
+            var responseText = await _llmService.GenerateResponseAsync(messages);
 
             // 3. Translate LLM text into Game Actions
             // Safely schedule back to main thread
@@ -120,7 +107,20 @@ Respond with ONLY the command.
             {
                 if (Exists(uid)) // Check if entity still exists
                 {
-                    ParseAndAct(uid, responseCommand);
+                    // Update History
+                    if (TryComp<LLMPersonalityComponent>(uid, out var personality))
+                    {
+                        personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", userPrompt));
+                        personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", responseText));
+
+                        // Prune if > 10 messages (5 turns)
+                        if (personality.History.Count > 10)
+                        {
+                            personality.History.RemoveRange(0, personality.History.Count - 10);
+                        }
+                    }
+
+                    ParseAndAct(uid, responseText);
                 }
             });
         }
@@ -132,6 +132,8 @@ Respond with ONLY the command.
 
     private void ParseAndAct(EntityUid uid, string command)
     {
+        if (string.IsNullOrWhiteSpace(command)) return;
+
         var parts = command.Split(' ');
         if (parts[0] == "MOVE" && parts.Length > 1)
         {
@@ -152,5 +154,4 @@ Respond with ONLY the command.
              }
         }
     }
-
 }

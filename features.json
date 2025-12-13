@@ -58,7 +58,7 @@
                 "Add rate limiting per NPC"
             ],
             "passes": false,
-            "notes": "Service layer refactored to use OpenAI SDK (Content.Server). Azure authentication fixed. MISSING: Conversation history and rate limiting."
+            "notes": "Service layer uses OpenAI SDK. Conversation history implementation completed. Rate limiting pending."
         },
         {
             "id": "llm-003",
@@ -71,7 +71,7 @@
                 "Implement conversation state tracking",
                 "Add memory system for past interactions"
             ],
-            "passes": true,
+            "passes": "partial",
             "notes": "MobLLMan implemented with spawning capability. Commit 6648100c60 - NPC spawns and wanders correctly."
         },
         {

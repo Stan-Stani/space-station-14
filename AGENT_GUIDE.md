@@ -43,7 +43,7 @@ If this script fails, your first priority is to fix the environment.
 - **Build Server**: `dotnet build Content.Server`
 - **Build Client**: `dotnet build Content.Client`
 - **Run Tests**: `dotnet test Content.Tests`
-- **Run Server**: `dotnet run --project Content.Server`
+- **Run Server**: `dotnet run --project Content.Server --config-file server_config.toml`
 - **Run Client**: `dotnet run --project Content.Client`
 
 ## 5. Project Structure
@@ -58,5 +58,13 @@ If this script fails, your first priority is to fix the environment.
 - **Do NOT delete** `agent-progress.txt` or `features.json`.
 - **Keep `features.json` up to date**.
 - **Always run verification** before handing off.
+
+## 7. Troubleshooting
+
+- **Build Errors Truncated?** If `dotnet build` errors are cut off (e.g. "Build failed with X errors"), redirect output to a file to see the full log:
+  ```powershell
+  dotnet build Content.Server > build.log
+  ```
+  Then view `build.log`.
 
 Good luck.
