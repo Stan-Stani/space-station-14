@@ -1,0 +1,361 @@
+{
+    "features": [
+        {
+            "id": "env-001",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Environment Initialization Script runs successfully",
+            "steps": [
+                "Run ./agent_init.ps1",
+                "Expect exit code 0",
+                "Expect 'Environment initialization complete!' message"
+            ],
+            "passes": true,
+            "notes": "Verified by agent_init.ps1 on 2025-12-12. Build successful."
+        },
+        {
+            "id": "env-002",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Content.Server builds successfully",
+            "steps": ["dotnet build Content.Server"],
+            "passes": true,
+            "notes": "Verified build."
+        },
+        {
+            "id": "env-003",
+            "category": "functional",
+            "priority": "critical",
+            "description": "Content.Client builds successfully",
+            "steps": ["dotnet build Content.Client"],
+            "passes": true,
+            "notes": "Verified build."
+        },
+        {
+            "id": "llm-001",
+            "category": "integration",
+            "priority": "critical",
+            "description": "LLM API Configuration System",
+            "steps": [
+                "Create LLMConfig component in Content.Server/LLM/",
+                "Add API endpoint configuration (URL, API key)",
+                "Implement retry logic and timeout handling",
+                "Add configuration validation on server startup"
+            ],
+            "passes": false,
+            "notes": "Required for connecting to Claude or other LLM APIs. Store API keys securely in server config."
+        },
+        {
+            "id": "llm-002",
+            "category": "integration",
+            "priority": "critical",
+            "description": "LLM Service Manager Component",
+            "steps": [
+                "Create ILLMService interface",
+                "Implement LLMService in Content.Server/LLM/",
+                "Add async request/response handling",
+                "Implement conversation history management",
+                "Add rate limiting per NPC"
+            ],
+            "passes": false,
+            "notes": "Core service for making LLM API calls. Should handle conversation context and manage token limits."
+        },
+        {
+            "id": "llm-003",
+            "category": "npc",
+            "priority": "critical",
+            "description": "LLM-Enabled NPC Component",
+            "steps": [
+                "Create LLMNPCComponent in Content.Shared/NPC/",
+                "Add personality/role configuration fields",
+                "Implement conversation state tracking",
+                "Add memory system for past interactions"
+            ],
+            "passes": true,
+            "notes": "MobLLMan implemented with spawning capability. Commit 6648100c60 - NPC spawns and wanders correctly."
+        },
+        {
+            "id": "llm-003b",
+            "category": "npc",
+            "priority": "critical",
+            "description": "NPC Movement and Wandering System",
+            "steps": [
+                "Implement basic pathfinding integration",
+                "Add idle wandering behavior",
+                "Handle collision and obstacle avoidance",
+                "Test spawn locations and movement"
+            ],
+            "passes": true,
+            "notes": "Completed in commit 6648100c60. MobLLMan can spawn and wander on station."
+        },
+        {
+            "id": "llm-004",
+            "category": "npc",
+            "priority": "high",
+            "description": "NPC Speech System Integration",
+            "steps": [
+                "Hook into existing chat/speech systems",
+                "Create LLMSpeechSystem in Content.Server/NPC/",
+                "Implement player message detection and routing",
+                "Add speech generation from LLM responses",
+                "Handle emotes and actions in responses"
+            ],
+            "passes": false,
+            "notes": "NPCs should respond when spoken to. Parse LLM output for speech vs actions."
+        },
+        {
+            "id": "llm-005",
+            "category": "npc",
+            "priority": "high",
+            "description": "Context Awareness System",
+            "steps": [
+                "Implement station environment context gathering",
+                "Add nearby entities and players detection",
+                "Include current job/role information",
+                "Add station alerts and events to context",
+                "Implement inventory and health state awareness"
+            ],
+            "passes": false,
+            "notes": "NPCs need to know what's happening around them to respond appropriately."
+        },
+        {
+            "id": "llm-006",
+            "category": "npc",
+            "priority": "medium",
+            "description": "NPC Action Execution System",
+            "steps": [
+                "Create action parser for LLM responses",
+                "Implement safe action whitelist",
+                "Add movement commands (walk to location)",
+                "Add interaction commands (use item, open door)",
+                "Add emote/gesture execution"
+            ],
+            "passes": false,
+            "notes": "Allow NPCs to perform actions based on LLM decisions. Must validate all actions for safety."
+        },
+        {
+            "id": "llm-007",
+            "category": "performance",
+            "priority": "high",
+            "description": "Response Caching System",
+            "steps": [
+                "Implement response cache in LLMService",
+                "Add common query pattern detection",
+                "Cache frequently asked questions",
+                "Implement cache invalidation logic"
+            ],
+            "passes": false,
+            "notes": "Reduce API calls for common interactions. Cache responses for 5-10 minutes."
+        },
+        {
+            "id": "llm-008",
+            "category": "performance",
+            "priority": "high",
+            "description": "Async Processing Queue",
+            "steps": [
+                "Create request queue system",
+                "Implement priority levels (player-initiated vs autonomous)",
+                "Add concurrent request limiting",
+                "Implement graceful degradation on API failures"
+            ],
+            "passes": false,
+            "notes": "Prevent server blocking. Queue requests and process asynchronously."
+        },
+        {
+            "id": "llm-009",
+            "category": "admin",
+            "priority": "medium",
+            "description": "Admin Control Panel",
+            "steps": [
+                "Add LLM toggle commands (enable/disable per NPC)",
+                "Create personality editor UI",
+                "Add conversation history viewer",
+                "Implement response filtering/moderation controls"
+            ],
+            "passes": false,
+            "notes": "Admins need tools to manage LLM NPCs and moderate content."
+        },
+        {
+            "id": "llm-010",
+            "category": "safety",
+            "priority": "critical",
+            "description": "Content Moderation System",
+            "steps": [
+                "Implement response filtering",
+                "Add profanity/toxicity detection",
+                "Create response override system",
+                "Add logging of all LLM interactions",
+                "Implement automatic NPC disable on policy violations"
+            ],
+            "passes": false,
+            "notes": "Critical for server safety. Log all interactions and filter inappropriate content."
+        },
+        {
+            "id": "llm-011",
+            "category": "testing",
+            "priority": "high",
+            "description": "LLM Mock Service for Testing",
+            "steps": [
+                "Create MockLLMService for unit tests",
+                "Add deterministic response patterns",
+                "Implement integration tests for NPC interactions",
+                "Add performance benchmarks"
+            ],
+            "passes": false,
+            "notes": "Test without hitting real API. Essential for CI/CD."
+        },
+        {
+            "id": "llm-012",
+            "category": "gameplay",
+            "priority": "medium",
+            "description": "Station-Specific NPC Roles",
+            "steps": [
+                "Create bartender personality template",
+                "Create medical doctor personality template",
+                "Create security officer personality template",
+                "Create janitor personality template",
+                "Add job-specific knowledge and behaviors"
+            ],
+            "passes": false,
+            "notes": "Pre-configured NPCs for common station roles with appropriate personalities."
+        },
+        {
+            "id": "llm-013",
+            "category": "gameplay",
+            "priority": "low",
+            "description": "Dynamic Quest/Task Generation",
+            "steps": [
+                "Allow NPCs to generate simple tasks for players",
+                "Implement task completion tracking",
+                "Add reward system integration",
+                "Create task validation logic"
+            ],
+            "passes": false,
+            "notes": "Optional advanced feature. NPCs could create dynamic gameplay content."
+        },
+        {
+            "id": "llm-015",
+            "category": "integration",
+            "priority": "critical",
+            "description": "Player Proximity Detection for MobLLMan",
+            "steps": [
+                "Add EntityLookup for nearby player detection",
+                "Implement hearing range for chat messages",
+                "Add 'attention' state when player is near",
+                "Filter chat messages by proximity to MobLLMan"
+            ],
+            "passes": false,
+            "notes": "Required so MobLLMan only responds to nearby players, not station-wide chat."
+        },
+        {
+            "id": "llm-016",
+            "category": "integration",
+            "priority": "high",
+            "description": "Chat Message Routing to LLM",
+            "steps": [
+                "Subscribe to ChatSystem events",
+                "Filter for messages directed at MobLLMan",
+                "Extract player name and message content",
+                "Route to LLMService with context",
+                "Handle conversation threading"
+            ],
+            "passes": false,
+            "notes": "Core feature to make MobLLMan interactive. Should detect 'LLMan' or direct speech."
+        },
+        {
+            "id": "llm-017",
+            "category": "integration",
+            "priority": "high",
+            "description": "Speech Output System for MobLLMan",
+            "steps": [
+                "Integrate with existing EntitySay system",
+                "Add typing indicator during LLM processing",
+                "Implement speech rate limiting",
+                "Handle multi-sentence responses (chunk output)"
+            ],
+            "passes": false,
+            "notes": "MobLLMan needs to speak responses back. Add delays to make it feel natural."
+        },
+        {
+            "id": "llm-018",
+            "category": "debug",
+            "priority": "high",
+            "description": "LLM Debug Console Commands",
+            "steps": [
+                "Add 'llm_test' command to trigger test message",
+                "Add 'llm_status' to show connection status",
+                "Add 'llm_history' to view conversation log",
+                "Add 'llm_reset' to clear NPC memory"
+            ],
+            "passes": false,
+            "notes": "Essential debugging tools. Test without needing to interact in-game."
+        },
+        {
+            "id": "llm-019",
+            "category": "personality",
+            "priority": "medium",
+            "description": "MobLLMan Base Personality System",
+            "steps": [
+                "Create system prompt for MobLLMan character",
+                "Define quirky/helpful personality traits",
+                "Add knowledge about Space Station 14 lore",
+                "Include job role and capabilities in context"
+            ],
+            "passes": false,
+            "notes": "Make MobLLMan feel like a unique character. Maybe janitor? Engineer? Clown?"
+        },
+        {
+            "id": "llm-020",
+            "category": "testing",
+            "priority": "high",
+            "description": "Integration Test Suite for MobLLMan",
+            "steps": [
+                "Test spawn command works consistently",
+                "Test wandering doesn't get stuck",
+                "Test player proximity detection",
+                "Test chat message routing",
+                "Test LLM response generation (with mock)"
+            ],
+            "passes": false,
+            "notes": "Automated tests for the full interaction pipeline."
+        }
+    ],
+    "implementation_order": [
+        "llm-001 (NEXT - Need API connection)",
+        "llm-002 (NEXT - Core service layer)",
+        "llm-010 (HIGH PRIORITY - Safety first)",
+        "llm-003 (✓ DONE - MobLLMan spawns)",
+        "llm-003b (✓ DONE - Wandering works)",
+        "llm-004 (NEXT - Make them talk!)",
+        "llm-005 (After talking - Add awareness)",
+        "llm-007 (Performance optimization)",
+        "llm-008 (Performance optimization)",
+        "llm-011 (Testing infrastructure)",
+        "llm-006 (Advanced - Actions)",
+        "llm-009 (Admin tools)",
+        "llm-012 (Content - Personalities)",
+        "llm-014 (Monitoring)",
+        "llm-013 (Advanced gameplay)"
+    ],
+    "current_status": {
+        "commit": "6648100c60aeb9d3d24ded44e3a0a2cb5141f9f9",
+        "branch": "llman",
+        "completed": ["MobLLMan entity created", "NPC spawning system working", "Wandering/pathfinding integrated"],
+        "next_immediate_steps": [
+            "Add LLM API configuration to server config",
+            "Create LLMService for API calls",
+            "Hook into chat system to detect player messages",
+            "Make MobLLMan respond to being spoken to"
+        ]
+    },
+    "testing_checklist": [
+        "NPC responds to player chat messages",
+        "NPC maintains conversation context",
+        "NPC actions are validated and safe",
+        "API failures don't crash server",
+        "Rate limiting prevents abuse",
+        "Content filtering blocks inappropriate responses",
+        "Admin commands work correctly",
+        "Performance remains acceptable under load"
+    ]
+}
