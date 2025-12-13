@@ -31,7 +31,8 @@ If this script fails, your first priority is to fix the environment.
 3. **Plan**: Create an `implementation_plan.md`.
 4. **Implement**: Write code.
 5. **Verify**:
-   - Run `./agent_init.ps1` to ensure you haven't broken the build.
+   - Run `./verify_game.ps1` to check both Client and Server builds efficiently.
+   - Run `./agent_init.ps1` if you need a full environment check (dependencies, submodules).
    - Run specific tests related to your changes.
 6. **Update Documentation**:
    - Update `features.json` if you implemented or fixed a feature (set `"passes": true`).
