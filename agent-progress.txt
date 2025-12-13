@@ -8,3 +8,14 @@ Action: Unlocked files and verified environment.
 Status: Success
 Notes: Resolved file locking issue by killing dotnet processes. Ran agent_init.ps1 successfully.
 ---
+[2025-12-12 22:54] - Session 2
+Action: Implemented LLM Integration (llm-001, llm-002) and Build Standardization.
+Status: Success
+Notes:
+- Added CCVars for LLM config (Content.Shared/CCVar/CCVars.LLM.cs).
+- Implemented LLMService (Content.Server/LLM/LLMService.cs) with validation and simple JSON parsing.
+- Added 'llm_test' console command.
+- Created 'verify_game.ps1' to standardize client+server build checks.
+- Updated AGENT_GUIDE.md.
+Validation: verify_game.ps1 passed. llm_test command built successfully (requires API key/endpoint to return valid response).
+---

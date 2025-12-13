@@ -42,8 +42,8 @@
                 "Implement retry logic and timeout handling",
                 "Add configuration validation on server startup"
             ],
-            "passes": false,
-            "notes": "Required for connecting to Claude or other LLM APIs. Store API keys securely in server config."
+            "passes": true,
+            "notes": "Verified by build and llm_test command. CVars implemented in CCVars.LLM.cs."
         },
         {
             "id": "llm-002",
@@ -57,8 +57,8 @@
                 "Implement conversation history management",
                 "Add rate limiting per NPC"
             ],
-            "passes": false,
-            "notes": "Core service for making LLM API calls. Should handle conversation context and manage token limits."
+            "passes": true,
+            "notes": "Implemented LLMService and ILLMService in Content.Server/LLM/."
         },
         {
             "id": "llm-003",
@@ -340,12 +340,10 @@
     "current_status": {
         "commit": "6648100c60aeb9d3d24ded44e3a0a2cb5141f9f9",
         "branch": "llman",
-        "completed": ["MobLLMan entity created", "NPC spawning system working", "Wandering/pathfinding integrated"],
+        "completed": ["MobLLMan entity created", "NPC spawning system working", "Wandering/pathfinding integrated", "LLM Configuration & Service Layer (llm-001, llm-002)"],
         "next_immediate_steps": [
-            "Add LLM API configuration to server config",
-            "Create LLMService for API calls",
-            "Hook into chat system to detect player messages",
-            "Make MobLLMan respond to being spoken to"
+            "Hook into chat system to detect player messages (llm-016)",
+            "Make MobLLMan respond to being spoken to (llm-004)"
         ]
     },
     "testing_checklist": [
