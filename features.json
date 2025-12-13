@@ -57,8 +57,8 @@
                 "Implement conversation history management",
                 "Add rate limiting per NPC"
             ],
-            "passes": true,
-            "notes": "Implemented LLMService and ILLMService in Content.Server/LLM/."
+            "passes": false,
+            "notes": "Partially implemented. 'ILLMService' and 'LLMService' exist with async support. MISSING: Conversation history management and per-NPC rate limiting in the service layer."
         },
         {
             "id": "llm-003",
