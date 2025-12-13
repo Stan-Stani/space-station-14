@@ -25,3 +25,14 @@ Status: Partial Success
 Notes: Verified LLMService basic implementation. Identified missing features: Conversation History and Rate Limiting. Updated features.json to reflect false pass status.
 ---
 
+
+## Session: Debugging Azure OpenAI Auth
+- **Date**: 2025-12-12
+- **Objective**: Resolve Azure authentication issues and build errors in LLMService.
+- **Actions**:
+  - Refactored LLMService.cs to use Azure.AI.OpenAI SDK (v2.0.0) alongside OpenAI (v2.0.0).
+  - Fixed version mismatch in Directory.Packages.props (OpenAI was 2.8.0, corrected to 2.0.0).
+  - Implemented proper Azure ApiKeyCredential and DefaultAzureCredential login logic.
+  - Removed erroneous ChatClientOptions code.
+  - Verified build success for Content.Server.
+- **Outcome**: Server builds successfully. Azure Auth confirmed working by user.

@@ -6,6 +6,8 @@
     -->
     <PackageVersion Remove="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageVersion Remove="Microsoft.EntityFrameworkCore.Design" />
+    <PackageVersion Include="Azure.AI.OpenAI" Version="2.0.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.17.1" />
     <PackageVersion Include="CsvHelper" Version="33.0.1" />
     <PackageVersion Include="ImGui.NET" Version="1.87.3" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.1">
@@ -15,6 +17,7 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite.Core" Version="9.0.1" />
     <PackageVersion Include="NetCord" Version="1.0.0-alpha.388" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.3" />
+    <PackageVersion Include="OpenAI" Version="2.0.0" />
     <PackageVersion Include="OpenTK" Version="4.9.4" />
     <PackageVersion Include="Veldrid" Version="4.8.0" />
     <PackageVersion Include="Veldrid.SPIRV" Version="1.0.15" />

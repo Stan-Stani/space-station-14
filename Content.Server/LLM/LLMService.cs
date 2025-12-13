@@ -1,15 +1,18 @@
 using System;
-using System.Net.Http;
-using System.Text;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Text.Json;
-using System.Collections.Generic;
 using Content.Shared.CCVar;
 using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
-using Robust.Shared.Serialization.Manager.Attributes;
+using Azure.Core; // For TokenCredential
+using Azure.Identity;
+using OpenAI;
+using OpenAI.Chat;
+using System.ClientModel;
+using System.ClientModel.Primitives;
+using Azure.AI.OpenAI; // Added for AzureOpenAIClient
 
 namespace Content.Server.LLM;
 
@@ -19,39 +22,10 @@ public sealed class LLMService : ILLMService, IPostInjectInit
     [Dependency] private readonly ILogManager _logManager = default!;
 
     private ISawmill _sawmill = default!;
-    private readonly HttpClient _httpClient = new();
 
     public void PostInject()
     {
         _sawmill = _logManager.GetSawmill("llm");
-    }
-
-    private struct OpenAIRequest
-    {
-        public string model { get; set; }
-        public bool stream { get; set; }
-        public List<OpenAIMessage> messages { get; set; }
-    }
-
-    private struct OpenAIMessage
-    {
-        public string role { get; set; }
-        public string content { get; set; }
-    }
-
-    private struct OpenAIResponse
-    {
-        public List<OpenAIChoice> choices { get; set; }
-    }
-
-    private struct OpenAIChoice
-    {
-        public OpenAIMessage message { get; set; }
-    }
-
-    private struct OllamaResponse
-    {
-        public string response { get; set; }
     }
 
     public async Task<string> GenerateResponseAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
@@ -66,60 +40,68 @@ public sealed class LLMService : ILLMService, IPostInjectInit
             return string.Empty;
         }
 
-        var requestPayload = new OpenAIRequest
-        {
-            model = model,
-            stream = false,
-            messages = new List<OpenAIMessage>
-            {
-                new() { role = "system", content = systemPrompt },
-                new() { role = "user", content = userPrompt }
-            }
-        };
-
         try
         {
-            var jsonContent = JsonSerializer.Serialize(requestPayload);
-            using var request = new HttpRequestMessage(HttpMethod.Post, apiUrl);
-            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            ChatClient client;
 
-            if (!string.IsNullOrEmpty(apiKey))
+            // Basic detection for Azure OpenAI
+            if (apiUrl.Contains("azure.com", StringComparison.OrdinalIgnoreCase))
             {
-                request.Headers.Add("Authorization", $"Bearer {apiKey}");
-            }
+                // Parse the base URI for Azure (scheme + host).
+                // AzureOpenAIClient expects "https://myresource.openai.azure.com/"
+                // User might provide "https://myresource.openai.azure.com/openai/v1/..."
+                var uri = new Uri(apiUrl);
+                var baseUri = new Uri($"{uri.Scheme}://{uri.Host}");
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-            var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
+                AzureOpenAIClient azureClient;
 
-            if (!response.IsSuccessStatusCode)
-            {
-                _sawmill.Error($"LLM API returned error: {response.StatusCode} - {responseString}");
-                return string.Empty;
-            }
-
-            // Try parsing as OpenAI first
-            try
-            {
-                var openAiResponse = JsonSerializer.Deserialize<OpenAIResponse>(responseString);
-                if (openAiResponse.choices != null && openAiResponse.choices.Count > 0)
+                if (!string.IsNullOrEmpty(apiKey) && apiKey != "dummy")
                 {
-                    return openAiResponse.choices[0].message.content;
+                    // Use API Key if provided and valid
+                    azureClient = new AzureOpenAIClient(baseUri, new ApiKeyCredential(apiKey));
                 }
-            }
-            catch {}
-
-            // Try parsing as Ollama
-            try
-            {
-                var ollamaResponse = JsonSerializer.Deserialize<OllamaResponse>(responseString);
-                if (!string.IsNullOrEmpty(ollamaResponse.response))
+                else
                 {
-                    return ollamaResponse.response;
+                    // Fallback to Identity
+                    azureClient = new AzureOpenAIClient(baseUri, new DefaultAzureCredential());
                 }
-            }
-            catch {}
 
-            return responseString;
+                // In Azure, 'model' CVar should correspond to the Deployment Name.
+                client = azureClient.GetChatClient(model);
+            }
+            else
+            {
+                // Standard OpenAI / Ollama
+
+                // If using a custom endpoint (like Ollama), passing the full URI including /v1 might be safer if the client respects it,
+                // but usually ChatClient expects the *Endpoint* property in options?
+                // Actually, for standard OpenAI, new ChatClient(model, key, options) defaults to OpenAI public API.
+                // We need to set the endpoint if it's not OpenAI. public.
+
+                var keyToUse = string.IsNullOrEmpty(apiKey) ? "dummy-key" : apiKey;
+
+                OpenAIClientOptions clientOptions = new OpenAIClientOptions
+                {
+                    Endpoint = new Uri(apiUrl)
+                };
+
+                client = new ChatClient(model, new ApiKeyCredential(keyToUse), clientOptions);
+            }
+
+            var messages = new List<ChatMessage>
+            {
+                new SystemChatMessage(systemPrompt),
+                new UserChatMessage(userPrompt)
+            };
+
+            ChatCompletion completion = await client.CompleteChatAsync(messages, cancellationToken: cancellationToken);
+
+            if (completion.Content != null && completion.Content.Count > 0)
+            {
+                return completion.Content[0].Text;
+            }
+
+            return string.Empty;
         }
         catch (Exception e)
         {
@@ -127,4 +109,6 @@ public sealed class LLMService : ILLMService, IPostInjectInit
             return string.Empty;
         }
     }
+
+    // BearerTokenPolicy removed as it is no longer needed with AzureOpenAIClient
 }

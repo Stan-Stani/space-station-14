@@ -43,7 +43,7 @@
                 "Add configuration validation on server startup"
             ],
             "passes": true,
-            "notes": "Verified by build and llm_test command. CVars implemented in CCVars.LLM.cs."
+            "notes": "Verified by build and llm_test command. CVars implemented. Support for both Standard OpenAI and Azure OpenAI (Key/Identity) added."
         },
         {
             "id": "llm-002",
@@ -58,7 +58,7 @@
                 "Add rate limiting per NPC"
             ],
             "passes": false,
-            "notes": "Partially implemented. 'ILLMService' and 'LLMService' exist with async support. MISSING: Conversation history management and per-NPC rate limiting in the service layer."
+            "notes": "Service layer refactored to use OpenAI SDK (Content.Server). Azure authentication fixed. MISSING: Conversation history and rate limiting."
         },
         {
             "id": "llm-003",
