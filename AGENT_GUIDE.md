@@ -47,6 +47,7 @@ If this script fails, your first priority is to fix the environment.
 - **Run Client**: `dotnet run --project Content.Client`
 
 - **LLM Debug**: `llm_debug` (or `llm_debug <EntityUid>`) - Lists LLM NPCs or views their history.
+- **LLM Test**: `llm_test [prompt]` - Tests the LLM service configuration and connectivity.
 
 ## 5. Project Structure
 

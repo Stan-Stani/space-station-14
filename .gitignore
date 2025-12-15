@@ -306,3 +306,6 @@ Resources/MapImages
 
 # Direnv stuff
 .direnv/
+
+# stan-stani
+server_config.toml

@@ -59,3 +59,12 @@ Notes:
   - Implemented event-based hearing (only processes speech within 10f range).
   - Added periodic tick (5s) for processing needs/vision to avoid spamming the LLM.
 Validation: Verified 'llm_debug' works. Vision grouping logic implemented.
+
+[2025-12-14] - Session: Configure Local Ollama
+Action: Configured server for local Ollama instance (qwen3:4b-instruct).
+Status: Success
+Notes:
+- Updated `server_config.toml` to point to `http://localhost:11434/v1` and use model `qwen3:4b-instruct`.
+- Verified connection using `llm_test` console command.
+- Updated `AGENT_GUIDE.md` to include `llm_test` command documentation.
+Validation: Server received response from local Ollama: "Hello! Yes, I'm here. How can I assist you today? 🌟".
