@@ -47,3 +47,15 @@ Notes: Verified LLMService basic implementation. Identified missing features: Co
   - Created `llm_memory_test` command for verification.
   - Restarted server with `--config-file server_config.toml` to ensure credentials loaded.
 - **Outcome**: `llm_memory_test` verified successful context retention. LLM accurately recalled user name from conversation history.
+
+---
+[2025-12-14] - Session: Optimization & Debugging
+Action: Optimized LLM Triggers and Added Debug Tools.
+Status: Success
+Notes:
+- Implemented 'llm_debug' command (Content.Server/LLM/Commands/LLMDebugCommand.cs) to inspect NPC history.
+- Optimized LLMPersonalitySystem.cs:
+  - Grouped identical entities in vision prompt (e.g., '50x catwalk') to save tokens.
+  - Implemented event-based hearing (only processes speech within 10f range).
+  - Added periodic tick (5s) for processing needs/vision to avoid spamming the LLM.
+Validation: Verified 'llm_debug' works. Vision grouping logic implemented.

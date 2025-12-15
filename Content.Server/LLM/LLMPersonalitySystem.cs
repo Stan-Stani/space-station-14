@@ -1,11 +1,16 @@
 using Content.Server.NPC.HTN;
 using Content.Shared.Nutrition.Components;
+using System.Linq;
 using Content.Server.NPC;
 using Content.Server.NPC.Systems;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Robust.Shared.Asynchronous;
 using OpenAI.Chat;
+using Content.Server.Chat.Systems;
+using Content.Shared.Chat;
+using Robust.Shared.Player;
+using System.IO;
 
 namespace Content.Server.LLM;
 
@@ -16,6 +21,14 @@ public sealed class LLMPersonalitySystem : EntitySystem
     [Dependency] private readonly HTNSystem _htn = default!;
     [Dependency] private readonly ITaskManager _taskManager = default!;
     [Dependency] private readonly ILLMService _llmService = default!;
+    [Dependency] private readonly ChatSystem _chat = default!;
+    [Dependency] private readonly SharedTransformSystem _transform = default!;
+
+    public override void Initialize()
+    {
+        base.Initialize();
+        SubscribeLocalEvent<EntitySpokeEvent>(OnEntitySpoke);
+    }
 
     // 1. Define the timer variables
     private float _accumulatedTime = 0f;
@@ -48,11 +61,27 @@ public sealed class LLMPersonalitySystem : EntitySystem
             var status = $"I am feeling {hunger.CurrentThreshold}.";
 
             var visibleEntities = new List<string>();
-            foreach (var entity in _lookup.GetEntitiesInRange(uid, 10f))
+
+            var entities = _lookup.GetEntitiesInRange(uid, 10f);
+
+            var groups = entities
+                .Where(e => e != uid)
+                .GroupBy(e => MetaData(e).EntityName);
+
+            foreach (var group in groups)
             {
-                if (entity == uid) continue;
-                var meta = MetaData(entity);
-                visibleEntities.Add($"{meta.EntityName} (ID: {entity})");
+                 var count = group.Count();
+                 var name = group.Key;
+                 if (count == 1)
+                 {
+                     visibleEntities.Add($"{name} (ID: {group.First()})");
+                 }
+                 else
+                 {
+                     var ids = string.Join(", ", group.Take(3).Select(e => e.ToString()));
+                     if (count > 3) ids += ", ...";
+                     visibleEntities.Add($"{count}x {name} (IDs: {ids})");
+                 }
             }
 
             var visionText = visibleEntities.Count > 0
@@ -77,6 +106,7 @@ Your goal is to survive and satisfy your needs.
 Available Commands:
 - NOOP
 - MOVE <TargetID> (e.g., MOVE 123)
+- SPEAK <Message> (e.g., SPEAK ""Hello there!"")
 Respond with ONLY the command.
 ";
             var userPrompt = $@"
@@ -85,7 +115,7 @@ Vision: {vision}
 ";
 
             // Build full message chain
-            var messages = new List<ChatMessage>
+            var messages = new List<OpenAI.Chat.ChatMessage>
             {
                 new SystemChatMessage(systemPrompt)
             };
@@ -107,11 +137,19 @@ Vision: {vision}
             {
                 if (Exists(uid)) // Check if entity still exists
                 {
+                    var cleanResponse = responseText.Trim();
+                    if (string.Equals(cleanResponse, "NOOP", StringComparison.OrdinalIgnoreCase))
+                        return;
+
                     // Update History
                     if (TryComp<LLMPersonalityComponent>(uid, out var personality))
                     {
-                        personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", userPrompt));
-                        personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", responseText));
+                        // Note: We do NOT add the transient 'userPrompt' (Status/Vision) to the permanent history.
+                        // We only add what the assistant actually did/said.
+                        personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", cleanResponse));
+
+                        LogConversation(uid, "Context", userPrompt);
+                        LogConversation(uid, "Assistant", cleanResponse);
 
                         // Prune if > 10 messages (5 turns)
                         if (personality.History.Count > 10)
@@ -120,7 +158,7 @@ Vision: {vision}
                         }
                     }
 
-                    ParseAndAct(uid, responseText);
+                    ParseAndAct(uid, cleanResponse);
                 }
             });
         }
@@ -153,5 +191,57 @@ Vision: {vision}
                  }
              }
         }
+        else if (parts[0] == "SPEAK" && parts.Length > 1)
+        {
+            // Reconstruct the message (it might have spaces)
+            var message = string.Join(" ", parts.Skip(1)).Trim('"');
+            _chat.TrySendInGameICMessage(uid, message, InGameICChatType.Speak, false);
+        }
+    }
+
+    private void OnEntitySpoke(EntitySpokeEvent args)
+    {
+        // Don't listen to ourselves
+        if (HasComp<LLMPersonalityComponent>(args.Source)) return;
+
+        // Listen to anyone speaking nearby
+        var query = EntityQueryEnumerator<LLMPersonalityComponent, TransformComponent>();
+        while (query.MoveNext(out var uid, out var personality, out var xform))
+        {
+            if (_transform.InRange(xform.Coordinates, Transform(args.Source).Coordinates, 10f)) // Hearing range
+            {
+                 var speakerName = Name(args.Source);
+                 var message = args.Message;
+
+                 // Add to history
+                 personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}] {message}"));
+                 LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}] {message}");
+
+                 // Prune if needed
+                 if (personality.History.Count > 10)
+                 {
+                     personality.History.RemoveRange(0, personality.History.Count - 10);
+                 }
+
+                 // Trigger immediate thought? Or wait for next update?
+                 // For now, let the periodic update handle it to avoid spamming the LLM on every message.
+                 // But checking the update loop, it processes history... yes.
+            }
+                }
+    }
+
+    private void LogConversation(EntityUid uid, string role, string content)
+    {
+        try
+        {
+            var logPath = "llm_conversation.log";
+            File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{uid}] [{role}]: {content}\n");
+        }
+        catch (Exception e)
+        {
+            // Fallback to internal logger if file write fails, to ensure we don't crash
+             Logger.ErrorS("llm", $"Failed to log conversation object to file: {e.Message}");
+        }
     }
 }
+

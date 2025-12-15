@@ -287,8 +287,8 @@
                 "Add 'llm_history' to view conversation log",
                 "Add 'llm_reset' to clear NPC memory"
             ],
-            "passes": false,
-            "notes": "Essential debugging tools. Test without needing to interact in-game."
+            "passes": true,
+            "notes": "Implemented llm_debug command to list NPCs and view conversation history."
         },
         {
             "id": "llm-019",

@@ -46,6 +46,8 @@ If this script fails, your first priority is to fix the environment.
 - **Run Server**: `dotnet run --project Content.Server --config-file server_config.toml`
 - **Run Client**: `dotnet run --project Content.Client`
 
+- **LLM Debug**: `llm_debug` (or `llm_debug <EntityUid>`) - Lists LLM NPCs or views their history.
+
 ## 5. Project Structure
 
 - `Content.Server/`: Server-side game logic.
