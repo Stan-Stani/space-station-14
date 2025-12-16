@@ -184,10 +184,10 @@ Vision: {vision}
                         LogConversation(uid, "Context", userPrompt);
                         LogConversation(uid, "Assistant", cleanResponse);
 
-                        // Prune if > 10 messages (5 turns)
-                        if (personality.History.Count > 10)
+                        // Prune if > 3 messages
+                        if (personality.History.Count > 3)
                         {
-                            personality.History.RemoveRange(0, personality.History.Count - 10);
+                            personality.History.RemoveRange(0, personality.History.Count - 3);
                         }
                     }
 
