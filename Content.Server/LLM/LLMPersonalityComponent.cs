@@ -10,6 +10,21 @@ public sealed partial class LLMPersonalityComponent : Component
     [DataField("history")]
     public List<PersonalityChatMessage> History = new();
 
+    /// <summary>
+    /// Timer for buffering speech inputs. 
+    /// When > 0, we are waiting for silence. 
+    /// When it hits 0, we trigger an update.
+    /// </summary>
+    [DataField("speechDebounceTimer")]
+    public float SpeechDebounceTimer = 0f;
+
+    /// <summary>
+    /// Time since the last LLM update was triggered.
+    /// Used for the background "I'm still here" update (e.g. every 60s).
+    /// </summary>
+    [DataField("timeSinceLastUpdate")]
+    public float TimeSinceLastUpdate = 0f;
+
     [DataDefinition]
     public partial struct PersonalityChatMessage
     {

@@ -100,8 +100,8 @@
                 "Add speech generation from LLM responses",
                 "Handle emotes and actions in responses"
             ],
-            "passes": false,
-            "notes": "NPCs should respond when spoken to. Parse LLM output for speech vs actions."
+            "passes": "partial",
+            "notes": "NPCs now detect speech and trigger context updates using a debounce timer. Actual speech generation (talking back) is handled by basic chat integration but needs refinement."
         },
         {
             "id": "llm-005",

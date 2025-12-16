@@ -37,78 +37,96 @@ public sealed class LLMPersonalitySystem : EntitySystem
     }
 
     // 1. Define the timer variables
-    private float _accumulatedTime = 0f;
-    private const float UpdateInterval = 30.0f; // Run every 5 seconds
+    // 1. Define the timer constants
+    private const float BackgroundUpdateInterval = 60.0f; // Run every 60 seconds if no speech
+    private const float SpeechDebounceTime = 5.0f; // Wait 5 seconds after speech before triggering
 
     public override void Update(float frameTime)
     {
         base.Update(frameTime);
 
-        // 2. Add the time passed since the last frame (delta time) to our counter
-        _accumulatedTime += frameTime;
-
-        // 3. Check: Has 5 seconds passed?
-        if (_accumulatedTime < UpdateInterval)
+        var query = EntityQueryEnumerator<LLMPersonalityComponent, HungerComponent, HTNComponent>();
+        while (query.MoveNext(out var uid, out var personality, out var hunger, out var htn))
         {
-            // If not, stop here. Do nothing this tick.
-            return;
-        }
+            // 2. Update Timers
+            personality.TimeSinceLastUpdate += frameTime;
 
-        // 4. Reset the timer (subtract the interval to keep rhythm)
-        _accumulatedTime -= UpdateInterval;
+            bool triggerUpdate = false;
 
-        // --- EXPENSIVE LOGIC STARTS HERE ---
-        // This block now only runs once every 5 seconds
-        foreach (var (hunger, htn, personality) in EntityQuery<HungerComponent, HTNComponent, LLMPersonalityComponent>())
-        {
-            var uid = hunger.Owner;
-
-            // 1. Gather Sensory Data
-            var status = $"I am feeling {hunger.CurrentThreshold}.";
-
-            var visibleEntities = new List<string>();
-
-            // Get all entities in range
-            var entities = _lookup.GetEntitiesInRange(uid, 10f);
-
-            // Filter and Sort Entities
-            var salientEntities = entities
-                .Where(e => e != uid) // Don't see self
-                .Where(e => IsSalient(e)) // Must be interesting
-                .Where(e => _interaction.InRangeUnobstructed(uid, e, 10f)) // Must be visible (LOS)
-                .OrderBy(e => _transform.GetWorldPosition(e).LengthSquared()) // Closest first (approx)
-                .Take(20); // Limit to 20
-
-            var groups = salientEntities
-                .GroupBy(e => MetaData(e).EntityName);
-
-            foreach (var group in groups)
+            // Check Debounce Timer
+            if (personality.SpeechDebounceTimer > 0f)
             {
-                var count = group.Count();
-                var name = group.Key;
-                if (count == 1)
+                personality.SpeechDebounceTimer -= frameTime;
+                if (personality.SpeechDebounceTimer <= 0f)
                 {
-                    visibleEntities.Add($"{name} (ID: {group.First()})");
-                }
-                else
-                {
-                    var ids = string.Join(", ", group.Take(3).Select(e => e.ToString()));
-                    if (count > 3) ids += ", ...";
-                    visibleEntities.Add($"{count}x {name} (IDs: {ids})");
+                    // Timer expired! Trigger update.
+                    triggerUpdate = true;
+                    // Ensure it stays at 0
+                    personality.SpeechDebounceTimer = 0f;
                 }
             }
+            // Check Background Timer (only if not currently debouncing)
+            else if (personality.TimeSinceLastUpdate >= BackgroundUpdateInterval)
+            {
+                triggerUpdate = true;
+            }
 
-            var visionText = visibleEntities.Count > 0
-                ? "I can see: " + string.Join(", ", visibleEntities)
-                : "I can see nothing.";
+            // 3. Trigger Logic
+            if (triggerUpdate)
+            {
+                personality.TimeSinceLastUpdate = 0f; // Reset background timer
 
-            // 2. Clone history for async use (Snapshot)
-            var historySnapshot = new List<LLMPersonalityComponent.PersonalityChatMessage>(personality.History);
+                // --- EXPENSIVE LOGIC STARTS HERE ---
+                // 1. Gather Sensory Data
+                var status = $"I am feeling {hunger.CurrentThreshold}.";
 
-            // 3. Send to LLM endpoint
-            ProcessLLMDecision(uid, status, visionText, historySnapshot);
+                var visibleEntities = new List<string>();
+
+                // Get all entities in range
+                var entities = _lookup.GetEntitiesInRange(uid, 10f);
+
+                // Filter and Sort Entities
+                var salientEntities = entities
+                    .Where(e => e != uid) // Don't see self
+                    .Where(e => IsSalient(e)) // Must be interesting
+                    .Where(e => _interaction.InRangeUnobstructed(uid, e, 10f)) // Must be visible (LOS)
+                    .OrderBy(e => _transform.GetWorldPosition(e).LengthSquared()) // Closest first (approx)
+                    .Take(20); // Limit to 20
+
+                var groups = salientEntities
+                    .GroupBy(e => MetaData(e).EntityName);
+
+                foreach (var group in groups)
+                {
+                    var count = group.Count();
+                    var name = group.Key;
+                    if (count == 1)
+                    {
+                        visibleEntities.Add($"{name} (ID: {group.First()})");
+                    }
+                    else
+                    {
+                        var ids = string.Join(", ", group.Take(3).Select(e => e.ToString()));
+                        if (count > 3) ids += ", ...";
+                        visibleEntities.Add($"{count}x {name} (IDs: {ids})");
+                    }
+                }
+
+                var visionText = visibleEntities.Count > 0
+                    ? "I can see: " + string.Join(", ", visibleEntities)
+                    : "I can see nothing.";
+
+                // 2. Clone history for async use (Snapshot)
+                var historySnapshot = new List<LLMPersonalityComponent.PersonalityChatMessage>(personality.History);
+
+                // 3. Send to LLM endpoint
+                ProcessLLMDecision(uid, status, visionText, historySnapshot);
+            }
         }
     }
+
+
+
 
     private async void ProcessLLMDecision(EntityUid uid, string status, string vision, List<LLMPersonalityComponent.PersonalityChatMessage> history)
     {
@@ -167,7 +185,7 @@ Vision: {vision}
                         LogConversation(uid, "Assistant", cleanResponse);
 
                         // Prune if > 10 messages (5 turns)
-                        if (personality.History.Count > 3)
+                        if (personality.History.Count > 10)
                         {
                             personality.History.RemoveRange(0, personality.History.Count - 10);
                         }
@@ -238,9 +256,9 @@ Vision: {vision}
                     personality.History.RemoveRange(0, personality.History.Count - 10);
                 }
 
-                // Trigger immediate thought? Or wait for next update?
-                // For now, let the periodic update handle it to avoid spamming the LLM on every message.
-                // But checking the update loop, it processes history... yes.
+                // Reset debounce timer to wait for silence
+                // This will delay the LLM response until 5 seconds AFTER the last spoke message.
+                personality.SpeechDebounceTimer = SpeechDebounceTime;
             }
         }
     }

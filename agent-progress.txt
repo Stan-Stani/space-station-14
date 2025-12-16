@@ -78,3 +78,12 @@ Notes:
 - Reduces noise in LLM vision context.
 Validation: Code compiles and `git status` shows modification.
 
+[2025-12-16] - Session: Speech-Triggered Updates
+Action: Implemented speech detection and debounce logic for LLM updates.
+Status: Success
+Notes:
+- Modified `Content.Server/LLM/LLMPersonalitySystem.cs` to replace fixed 30s timer with event-based trigger.
+- Added `SpeechDebounceTimer` (5s) to `LLMPersonalityComponent.cs`.
+- Added `BackgroundUpdateInterval` (60s) to ensure NPCs stay alive in silence.
+- Fixed logic error in history pruning affecting `RemoveRange`.
+Validation: Built successfully. Logic reviewed relative to user request only to send updates on speech.
