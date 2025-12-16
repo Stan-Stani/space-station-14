@@ -68,3 +68,13 @@ Notes:
 - Verified connection using `llm_test` console command.
 - Updated `AGENT_GUIDE.md` to include `llm_test` command documentation.
 Validation: Server received response from local Ollama: "Hello! Yes, I'm here. How can I assist you today? 🌟".
+
+[2025-12-16] - Session: Entity Filtering
+Action: Filtered entities sent to LLM by saliency.
+Status: Success
+Notes:
+- Modified `Content.Server/LLM/LLMPersonalitySystem.cs` to implement `IsSalient` filter.
+- Filters include: ItemComponent, MobStateComponent, DoorComponent, ActivatableUIComponent.
+- Reduces noise in LLM vision context.
+Validation: Code compiles and `git status` shows modification.
+

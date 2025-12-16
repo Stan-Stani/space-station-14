@@ -9,9 +9,9 @@
 
   # PRIORITY 2: DEFAULT (WANDER)
   # Otherwise, just wander around.
-  - tasks:
-    - !type:HTNCompoundTask
-      task: IdleCompound
+  # - tasks:
+  #   - !type:HTNCompoundTask
+  #     task: IdleCompound
 
 - type: htnCompound
   id: MoveToTargetCompound

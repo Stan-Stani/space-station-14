@@ -11,6 +11,11 @@ using Content.Server.Chat.Systems;
 using Content.Shared.Chat;
 using Robust.Shared.Player;
 using System.IO;
+using Content.Shared.Interaction;
+using Content.Shared.Item;
+using Content.Shared.Mobs.Components;
+using Content.Shared.Doors.Components;
+using Content.Shared.UserInterface;
 
 namespace Content.Server.LLM;
 
@@ -23,6 +28,7 @@ public sealed class LLMPersonalitySystem : EntitySystem
     [Dependency] private readonly ILLMService _llmService = default!;
     [Dependency] private readonly ChatSystem _chat = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private readonly SharedInteractionSystem _interaction = default!;
 
     public override void Initialize()
     {
@@ -32,7 +38,7 @@ public sealed class LLMPersonalitySystem : EntitySystem
 
     // 1. Define the timer variables
     private float _accumulatedTime = 0f;
-    private const float UpdateInterval = 5.0f; // Run every 5 seconds
+    private const float UpdateInterval = 30.0f; // Run every 5 seconds
 
     public override void Update(float frameTime)
     {
@@ -62,26 +68,34 @@ public sealed class LLMPersonalitySystem : EntitySystem
 
             var visibleEntities = new List<string>();
 
+            // Get all entities in range
             var entities = _lookup.GetEntitiesInRange(uid, 10f);
 
-            var groups = entities
-                .Where(e => e != uid)
+            // Filter and Sort Entities
+            var salientEntities = entities
+                .Where(e => e != uid) // Don't see self
+                .Where(e => IsSalient(e)) // Must be interesting
+                .Where(e => _interaction.InRangeUnobstructed(uid, e, 10f)) // Must be visible (LOS)
+                .OrderBy(e => _transform.GetWorldPosition(e).LengthSquared()) // Closest first (approx)
+                .Take(20); // Limit to 20
+
+            var groups = salientEntities
                 .GroupBy(e => MetaData(e).EntityName);
 
             foreach (var group in groups)
             {
-                 var count = group.Count();
-                 var name = group.Key;
-                 if (count == 1)
-                 {
-                     visibleEntities.Add($"{name} (ID: {group.First()})");
-                 }
-                 else
-                 {
-                     var ids = string.Join(", ", group.Take(3).Select(e => e.ToString()));
-                     if (count > 3) ids += ", ...";
-                     visibleEntities.Add($"{count}x {name} (IDs: {ids})");
-                 }
+                var count = group.Count();
+                var name = group.Key;
+                if (count == 1)
+                {
+                    visibleEntities.Add($"{name} (ID: {group.First()})");
+                }
+                else
+                {
+                    var ids = string.Join(", ", group.Take(3).Select(e => e.ToString()));
+                    if (count > 3) ids += ", ...";
+                    visibleEntities.Add($"{count}x {name} (IDs: {ids})");
+                }
             }
 
             var visionText = visibleEntities.Count > 0
@@ -129,6 +143,7 @@ Vision: {vision}
             messages.Add(new UserChatMessage(userPrompt));
 
             // Call Service
+
             var responseText = await _llmService.GenerateResponseAsync(messages);
 
             // 3. Translate LLM text into Game Actions
@@ -152,7 +167,7 @@ Vision: {vision}
                         LogConversation(uid, "Assistant", cleanResponse);
 
                         // Prune if > 10 messages (5 turns)
-                        if (personality.History.Count > 10)
+                        if (personality.History.Count > 3)
                         {
                             personality.History.RemoveRange(0, personality.History.Count - 10);
                         }
@@ -175,21 +190,21 @@ Vision: {vision}
         var parts = command.Split(' ');
         if (parts[0] == "MOVE" && parts.Length > 1)
         {
-             if (int.TryParse(parts[1], out int targetIdVal))
-             {
-                 var target = new EntityUid(targetIdVal);
-                 if (Exists(target))
-                 {
-                     var targetCoords = Transform(target).Coordinates;
-                     _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
+            if (int.TryParse(parts[1], out int targetIdVal))
+            {
+                var target = new EntityUid(targetIdVal);
+                if (Exists(target))
+                {
+                    var targetCoords = Transform(target).Coordinates;
+                    _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
 
-                     // Force replan to pick up the new blackboard value immediately
-                     if (TryComp<HTNComponent>(uid, out var htn))
-                     {
-                         _htn.Replan(htn);
-                     }
-                 }
-             }
+                    // Force replan to pick up the new blackboard value immediately
+                    if (TryComp<HTNComponent>(uid, out var htn))
+                    {
+                        _htn.Replan(htn);
+                    }
+                }
+            }
         }
         else if (parts[0] == "SPEAK" && parts.Length > 1)
         {
@@ -210,24 +225,24 @@ Vision: {vision}
         {
             if (_transform.InRange(xform.Coordinates, Transform(args.Source).Coordinates, 10f)) // Hearing range
             {
-                 var speakerName = Name(args.Source);
-                 var message = args.Message;
+                var speakerName = Name(args.Source);
+                var message = args.Message;
 
-                 // Add to history
-                 personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}] {message}"));
-                 LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}] {message}");
+                // Add to history
+                personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}] {message}"));
+                LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}] {message}");
 
-                 // Prune if needed
-                 if (personality.History.Count > 10)
-                 {
-                     personality.History.RemoveRange(0, personality.History.Count - 10);
-                 }
-
-                 // Trigger immediate thought? Or wait for next update?
-                 // For now, let the periodic update handle it to avoid spamming the LLM on every message.
-                 // But checking the update loop, it processes history... yes.
-            }
+                // Prune if needed
+                if (personality.History.Count > 10)
+                {
+                    personality.History.RemoveRange(0, personality.History.Count - 10);
                 }
+
+                // Trigger immediate thought? Or wait for next update?
+                // For now, let the periodic update handle it to avoid spamming the LLM on every message.
+                // But checking the update loop, it processes history... yes.
+            }
+        }
     }
 
     private void LogConversation(EntityUid uid, string role, string content)
@@ -240,8 +255,17 @@ Vision: {vision}
         catch (Exception e)
         {
             // Fallback to internal logger if file write fails, to ensure we don't crash
-             Logger.ErrorS("llm", $"Failed to log conversation object to file: {e.Message}");
+            Logger.ErrorS("llm", $"Failed to log conversation object to file: {e.Message}");
         }
+    }
+
+    private bool IsSalient(EntityUid uid)
+    {
+        // Filter what we consider "interesting" to look at
+        return HasComp<ItemComponent>(uid) ||
+               HasComp<MobStateComponent>(uid) ||
+               HasComp<DoorComponent>(uid) ||
+               HasComp<ActivatableUIComponent>(uid);
     }
 }
 

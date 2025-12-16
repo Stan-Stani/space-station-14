@@ -54,6 +54,7 @@ public sealed class LLMService : ILLMService, IPostInjectInit
         {
             var client = CreateClient(apiUrl, apiKey, model);
 
+            _sawmill.Debug("sending to llm.");
             ChatCompletion completion = await client.CompleteChatAsync(messages, cancellationToken: cancellationToken);
 
             if (completion.Content != null && completion.Content.Count > 0)

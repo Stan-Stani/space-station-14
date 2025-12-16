@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Client",
+        "name": "Client",
             "type": "coreclr",
             "request": "launch",
             "program": "${workspaceFolder}/bin/Content.Client/Content.Client.dll",
@@ -27,7 +27,7 @@
             "type": "coreclr",
             "request": "launch",
             "program": "${workspaceFolder}/bin/Content.Server/Content.Server.dll",
-            "args": [],
+        "args": ["--config-file", "server_config.toml"],
             "console": "integratedTerminal",
             "stopAtEntry": false
         },
