@@ -104,5 +104,7 @@ Notes:
 - Modified `Content.Server/LLM/LLMPersonalitySystem.cs` to check for `BodyPartComponent`.
 - Excluded entities where `BodyPartComponent.Body` is not null.
 - Included entities with `BodyComponent` or `HumanoidAppearanceComponent` to ensure main body visibility.
+- Filtered attached organs (via `OrganComponent`).
 Validation: Verified compilation.
+
 

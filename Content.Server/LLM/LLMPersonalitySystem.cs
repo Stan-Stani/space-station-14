@@ -19,6 +19,7 @@ using Content.Shared.UserInterface;
 
 using Content.Shared.Body.Part;
 using Content.Shared.Body.Components;
+using Content.Shared.Body.Organ;
 using Content.Shared.Humanoid;
 
 namespace Content.Server.LLM;
@@ -288,6 +289,13 @@ Vision: {vision}
         {
             // If it has a parent Body, it's attached. Ignore it.
             if (bodyPart.Body != null)
+                return false;
+        }
+
+        // Check for attached organs
+        if (TryComp<OrganComponent>(uid, out var organ))
+        {
+            if (organ.Body != null)
                 return false;
         }
 
