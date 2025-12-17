@@ -17,6 +17,8 @@ using Content.Shared.Mobs.Components;
 using Content.Shared.Doors.Components;
 using Content.Shared.UserInterface;
 
+using Content.Shared.Body.Part;
+
 namespace Content.Server.LLM;
 
 public sealed class LLMPersonalitySystem : EntitySystem
@@ -279,6 +281,14 @@ Vision: {vision}
 
     private bool IsSalient(EntityUid uid)
     {
+        // Check for attached body parts
+        if (TryComp<BodyPartComponent>(uid, out var bodyPart))
+        {
+            // If it has a parent Body, it's attached. Ignore it.
+            if (bodyPart.Body != null)
+                return false;
+        }
+
         // Filter what we consider "interesting" to look at
         return HasComp<ItemComponent>(uid) ||
                HasComp<MobStateComponent>(uid) ||
