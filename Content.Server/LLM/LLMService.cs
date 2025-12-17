@@ -12,7 +12,8 @@ using OpenAI;
 using OpenAI.Chat;
 using System.ClientModel;
 using System.ClientModel.Primitives;
-using Azure.AI.OpenAI; // Added for AzureOpenAIClient
+using Azure.AI.OpenAI;
+using System.Linq; // Added for AzureOpenAIClient
 
 namespace Content.Server.LLM;
 
@@ -54,7 +55,23 @@ public sealed class LLMService : ILLMService, IPostInjectInit
         {
             var client = CreateClient(apiUrl, apiKey, model);
 
-            _sawmill.Debug("sending to llm.");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("sending to llm:");
+            foreach (var m in messages)
+            {
+                string role = m switch
+                {
+                    SystemChatMessage => "system",
+                    UserChatMessage => "user",
+                    AssistantChatMessage => "assistant",
+                    ToolChatMessage => "tool",
+                    _ => "unknown"
+                };
+
+                var text = string.Join("", m.Content.Select(c => c.Text));
+                sb.AppendLine($"[{role}]: {text}");
+            }
+            _sawmill.Debug(sb.ToString());
             ChatCompletion completion = await client.CompleteChatAsync(messages, cancellationToken: cancellationToken);
 
             if (completion.Content != null && completion.Content.Count > 0)

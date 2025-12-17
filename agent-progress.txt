@@ -87,3 +87,12 @@ Notes:
 - Added `BackgroundUpdateInterval` (60s) to ensure NPCs stay alive in silence.
 - Fixed logic error in history pruning affecting `RemoveRange`.
 Validation: Built successfully. Logic reviewed relative to user request only to send updates on speech.
+
+[2025-12-16] - Session: Logging LLM Content
+Action: Updated LLMService to log message text content.
+Status: Success
+Notes:
+- Modified `Content.Server/LLM/LLMService.cs` to iterate over message parts and log text.
+- Fixed `ChatMessage` role handling by using pattern matching.
+Validation: Verified compilation with `verify_game.ps1`.
+
