@@ -18,6 +18,8 @@ using Content.Shared.Doors.Components;
 using Content.Shared.UserInterface;
 
 using Content.Shared.Body.Part;
+using Content.Shared.Body.Components;
+using Content.Shared.Humanoid;
 
 namespace Content.Server.LLM;
 
@@ -293,7 +295,9 @@ Vision: {vision}
         return HasComp<ItemComponent>(uid) ||
                HasComp<MobStateComponent>(uid) ||
                HasComp<DoorComponent>(uid) ||
-               HasComp<ActivatableUIComponent>(uid);
+               HasComp<ActivatableUIComponent>(uid) ||
+               HasComp<BodyComponent>(uid) ||
+               HasComp<HumanoidAppearanceComponent>(uid);
     }
 }
 
