@@ -123,7 +123,7 @@
     #     operator: !type:EquipOperator
 
     # Pickup ammo if any nearby
-    #- preconditions:
+    #- preconditions:``
     #    - !type:GunAmmoPrecondition
     #      maxPercent: 0.0
     #  tasks:

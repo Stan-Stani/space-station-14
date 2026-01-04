@@ -1,5 +1,8 @@
 using Content.Server.NPC.HTN;
+using Content.Server.NPC.HTN.PrimitiveTasks.Operators;
 using Content.Shared.Nutrition.Components;
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using Content.Server.NPC;
 using Content.Server.NPC.Systems;
@@ -21,6 +24,11 @@ using Content.Shared.Body.Part;
 using Content.Shared.Body.Components;
 using Content.Shared.Body.Organ;
 using Content.Shared.Humanoid;
+using Content.Shared.Mobs;
+using Content.Server.Mapping;
+using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
+using Robust.Shared.Containers;
 
 namespace Content.Server.LLM;
 
@@ -34,6 +42,19 @@ public sealed class LLMPersonalitySystem : EntitySystem
     [Dependency] private readonly ChatSystem _chat = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedInteractionSystem _interaction = default!;
+    [Dependency] private readonly SharedContainerSystem _container = default!;
+
+    /// <summary>
+    /// When the NPC is already executing a MoveToOperator that uses MovementTarget, forcing a replan can cause
+    /// the old operator's shutdown to remove MovementTarget after planning but before the new task starts,
+    /// leading to a KeyNotFoundException in MoveToOperator.Startup.
+    ///
+    /// To avoid that without changing the HTN/operator code, we defer setting MovementTarget until it's safe.
+    /// </summary>
+    private readonly Dictionary<EntityUid, EntityCoordinates> _pendingMovementTargets = new();
+
+
+
 
     public override void Initialize()
     {
@@ -53,6 +74,22 @@ public sealed class LLMPersonalitySystem : EntitySystem
         var query = EntityQueryEnumerator<LLMPersonalityComponent, HungerComponent, HTNComponent>();
         while (query.MoveNext(out var uid, out var personality, out var hunger, out var htn))
         {
+            // The default HTN behavior is to continuously request/reinstall "better" plans.
+            // If a plan swap shuts down a running MoveToOperator, it may remove MovementTarget while a new plan
+            // (built from a blackboard clone where the key existed) is starting up, causing a KeyNotFoundException.
+            // For LLM-driven NPCs, we only want to plan when needed, not constantly mid-execution.
+            if (htn.ConstantlyReplan)
+                htn.ConstantlyReplan = false;
+
+            // If we have a deferred MOVE command, apply it once the current operator is no longer
+            // a MoveToOperator that consumes/removes MovementTarget.
+            if (_pendingMovementTargets.TryGetValue(uid, out var pendingTarget) && CanSafelySetMovementTarget(htn))
+            {
+                _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, pendingTarget);
+                _htn.Replan(htn);
+                _pendingMovementTargets.Remove(uid);
+            }
+
             // 2. Update Timers
             personality.TimeSinceLastUpdate += frameTime;
 
@@ -91,9 +128,18 @@ public sealed class LLMPersonalitySystem : EntitySystem
                 var entities = _lookup.GetEntitiesInRange(uid, 10f);
 
                 // Filter and Sort Entities
+                var personEntities = entities
+                    .Where(e => e != uid) // Don't see self
+                    .Where(IsEntityAlive); // Must be alive
+                    // .Where(e => _interaction.InRangeUnobstructed(uid, e, 10f)) // Must be visible (LOS)
+                    // .OrderBy(e => _transform.GetWorldPosition(e).LengthSquared()) // Closest first (approx)
+                    // .Take(20); // Limit to 20
+
+                // Filter and Sort Entities
                 var salientEntities = entities
                     .Where(e => e != uid) // Don't see self
                     .Where(e => IsSalient(e)) // Must be interesting
+                    .Where(IsEntityInWorld)
                     .Where(e => _interaction.InRangeUnobstructed(uid, e, 10f)) // Must be visible (LOS)
                     .OrderBy(e => _transform.GetWorldPosition(e).LengthSquared()) // Closest first (approx)
                     .Take(20); // Limit to 20
@@ -130,7 +176,37 @@ public sealed class LLMPersonalitySystem : EntitySystem
         }
     }
 
+    public bool IsEntityAlive(EntityUid entityUid)
+    {
+        // Try to get the MobStateComponent. If the entity doesn't have it, it's likely not a "living" entity in the traditional sense (e.g., a wall, a tool).
+        if (EntityManager.TryGetComponent<MobStateComponent>(entityUid, out var mobState))
+        {
+            // Check the specific state provided by the component.
+            // The exact enum value might be different, but typically it is something like MobState.Alive or similar.
+            return mobState.CurrentState == MobState.Alive;
+        }
 
+        // If it doesn't have a MobStateComponent, we assume it's not a living thing that can be "dead" or "alive" in the game's context.
+        return false;
+    }
+
+    /// <summary>
+    /// Not in inventory etc
+    /// </summary>
+    /// <param name="entityUid"></param>
+    /// <returns></returns>
+    public bool IsEntityInWorld(EntityUid entityUid)
+    {
+
+        // Returns true if the entity is inside ANY container
+        // (backpack, player hands, locker, etc.)
+        if (_container.IsEntityInContainer(entityUid))
+            return false;
+
+        // If it's not in a container, it's usually on the floor (parented to a Grid)
+        return true;
+
+    }
 
 
     private async void ProcessLLMDecision(EntityUid uid, string status, string vision, List<LLMPersonalityComponent.PersonalityChatMessage> history)
@@ -141,13 +217,13 @@ public sealed class LLMPersonalitySystem : EntitySystem
 You are an NPC in Space Station 14.
 Your goal is to survive and satisfy your needs.
 Available Commands:
-- NOOP
-- MOVE <TargetID> (e.g., MOVE 123)
-- SPEAK <Message> (e.g., SPEAK ""Hello there!"")
+- [~NOOP~]
+- [~MOVE~] <TargetID> (e.g., [~MOVE~] 123)
+- [~SPEAK~] <Message> (e.g., [~SPEAK~] ""Hello there!"")
 Respond with ONLY the command.
 ";
             var userPrompt = $@"
-Status: {status}
+Status: {status}`
 Vision: {vision}
 ";
 
@@ -173,30 +249,66 @@ Vision: {vision}
             // Safely schedule back to main thread
             _taskManager.RunOnMainThread(() =>
             {
-                if (Exists(uid)) // Check if entity still exists
-                {
-                    var cleanResponse = responseText.Trim();
-                    if (string.Equals(cleanResponse, "NOOP", StringComparison.OrdinalIgnoreCase))
-                        return;
+                if (!Exists(uid)) // Check if entity still exists
+                    return;
 
-                    // Update History
-                    if (TryComp<LLMPersonalityComponent>(uid, out var personality))
+                var cleanResponse = (responseText ?? string.Empty).Trim();
+
+                // Extract ALL command-looking segments. Each match is treated as one command line.
+                var commandRegex = new System.Text.RegularExpressions.Regex(
+                    @"\[\~[A-Za-z0-9]+\~\][^\r\n]*",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+                var whitespaceRegex = new System.Text.RegularExpressions.Regex(
+                    @"[ \t]+",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+                var commands = commandRegex.Matches(cleanResponse)
+                    .Select(m =>
                     {
-                        // Note: We do NOT add the transient 'userPrompt' (Status/Vision) to the permanent history.
-                        // We only add what the assistant actually did/said.
-                        personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", cleanResponse));
+                        var cmd = m.Value.Trim();
 
-                        LogConversation(uid, "Context", userPrompt);
-                        LogConversation(uid, "Assistant", cleanResponse);
+                        // Collapse extra whitespace but keep the command token intact
+                        cmd = whitespaceRegex.Replace(cmd, " ").Trim();
 
-                        // Prune if > 3 messages
-                        if (personality.History.Count > 3)
-                        {
-                            personality.History.RemoveRange(0, personality.History.Count - 3);
-                        }
+                        // Ensure it's a single line
+                        cmd = cmd.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
+                            .FirstOrDefault()?.Trim() ?? string.Empty;
+
+                        return cmd;
+                    })
+                    .Where(cmd => !string.IsNullOrWhiteSpace(cmd))
+                    .ToList();
+
+                if (commands.Count == 0)
+                    return;
+
+                // Remove NOOP commands (but still allow other commands in the same response)
+                commands.RemoveAll(cmd => string.Equals(cmd, "[~NOOP~]", StringComparison.OrdinalIgnoreCase));
+
+                if (commands.Count == 0)
+                    return;
+
+                // Update History (store the whole batch as a single assistant turn)
+                if (TryComp<LLMPersonalityComponent>(uid, out var personality))
+                {
+                    var historyEntry = string.Join("\n", commands);
+                    personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", historyEntry));
+
+                    LogConversation(uid, "Context", userPrompt);
+                    LogConversation(uid, "Assistant", historyEntry);
+
+                    // Prune if > 3 messages
+                    if (personality.History.Count > 3)
+                    {
+                        personality.History.RemoveRange(0, personality.History.Count - 3);
                     }
+                }
 
-                    ParseAndAct(uid, cleanResponse);
+                // Execute all commands in order
+                foreach (var cmd in commands)
+                {
+                    ParseAndAct(uid, cmd);
                 }
             });
         }
@@ -211,25 +323,35 @@ Vision: {vision}
         if (string.IsNullOrWhiteSpace(command)) return;
 
         var parts = command.Split(' ');
-        if (parts[0] == "MOVE" && parts.Length > 1)
+        if (parts[0] == "[~MOVE~]" && parts.Length > 1)
         {
             if (int.TryParse(parts[1], out int targetIdVal))
             {
                 var target = new EntityUid(targetIdVal);
                 if (Exists(target))
                 {
-                    var targetCoords = Transform(target).Coordinates;
+                    var targetCoords = _transform.GetMoverCoordinates(target);
+
+                    // If we're currently executing a MoveToOperator that uses MovementTarget,
+                    // setting the key + forcing a replan can crash later during plan swap.
+                    // Defer until it's safe.
+                    if (TryComp<HTNComponent>(uid, out var htn) && !CanSafelySetMovementTarget(htn))
+                    {
+                        _pendingMovementTargets[uid] = targetCoords;
+                        return;
+                    }
+
                     _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
 
                     // Force replan to pick up the new blackboard value immediately
-                    if (TryComp<HTNComponent>(uid, out var htn))
+                    if (TryComp<HTNComponent>(uid, out var htn2))
                     {
-                        _htn.Replan(htn);
+                        _htn.Replan(htn2);
                     }
                 }
             }
         }
-        else if (parts[0] == "SPEAK" && parts.Length > 1)
+        else if (parts[0] == "[~SPEAK~]" && parts.Length > 1)
         {
             // Reconstruct the message (it might have spaces)
             var message = string.Join(" ", parts.Skip(1)).Trim('"');
@@ -249,11 +371,12 @@ Vision: {vision}
             if (_transform.InRange(xform.Coordinates, Transform(args.Source).Coordinates, 10f)) // Hearing range
             {
                 var speakerName = Name(args.Source);
+                var speakerUid = args.Source;
                 var message = args.Message;
 
                 // Add to history
-                personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}] {message}"));
-                LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}] {message}");
+                personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}[{speakerUid}]] {message}"));
+                LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}[{speakerUid}]] {message}");
 
                 // Prune if needed
                 if (personality.History.Count > 10)
@@ -306,6 +429,17 @@ Vision: {vision}
                HasComp<ActivatableUIComponent>(uid) ||
                HasComp<BodyComponent>(uid) ||
                HasComp<HumanoidAppearanceComponent>(uid);
+    }
+
+    private static bool CanSafelySetMovementTarget(HTNComponent htn)
+    {
+        // The crash scenario happens when a new plan is built using MovementTarget from a blackboard clone,
+        // then the *current* MoveToOperator shuts down and removes MovementTarget before the new plan starts.
+        // Avoid triggering that by not touching MovementTarget while such an operator is active.
+        if (htn.Plan?.CurrentOperator is not MoveToOperator move)
+            return true;
+
+        return !string.Equals(move.TargetKey, NPCBlackboard.MovementTarget, StringComparison.Ordinal);
     }
 }
 
