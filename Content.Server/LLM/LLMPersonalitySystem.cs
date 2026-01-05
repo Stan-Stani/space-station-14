@@ -74,13 +74,6 @@ public sealed class LLMPersonalitySystem : EntitySystem
         var query = EntityQueryEnumerator<LLMPersonalityComponent, HungerComponent, HTNComponent>();
         while (query.MoveNext(out var uid, out var personality, out var hunger, out var htn))
         {
-            // The default HTN behavior is to continuously request/reinstall "better" plans.
-            // If a plan swap shuts down a running MoveToOperator, it may remove MovementTarget while a new plan
-            // (built from a blackboard clone where the key existed) is starting up, causing a KeyNotFoundException.
-            // For LLM-driven NPCs, we only want to plan when needed, not constantly mid-execution.
-            if (htn.ConstantlyReplan)
-                htn.ConstantlyReplan = false;
-
             // If we have a deferred MOVE command, apply it once the current operator is no longer
             // a MoveToOperator that consumes/removes MovementTarget.
             if (_pendingMovementTargets.TryGetValue(uid, out var pendingTarget) && CanSafelySetMovementTarget(htn))
@@ -171,7 +164,7 @@ public sealed class LLMPersonalitySystem : EntitySystem
                 var historySnapshot = new List<LLMPersonalityComponent.PersonalityChatMessage>(personality.History);
 
                 // 3. Send to LLM endpoint
-                ProcessLLMDecision(uid, status, visionText, historySnapshot);
+                GetAndProcessLLMDecision(uid, status, visionText, historySnapshot);
             }
         }
     }
@@ -209,7 +202,7 @@ public sealed class LLMPersonalitySystem : EntitySystem
     }
 
 
-    private async void ProcessLLMDecision(EntityUid uid, string status, string vision, List<LLMPersonalityComponent.PersonalityChatMessage> history)
+    private async void GetAndProcessLLMDecision(EntityUid uid, string status, string vision, List<LLMPersonalityComponent.PersonalityChatMessage> history)
     {
         try
         {
@@ -247,76 +240,83 @@ Vision: {vision}
 
             // 3. Translate LLM text into Game Actions
             // Safely schedule back to main thread
-            _taskManager.RunOnMainThread(() =>
-            {
-                if (!Exists(uid)) // Check if entity still exists
-                    return;
-
-                var cleanResponse = (responseText ?? string.Empty).Trim();
-
-                // Extract ALL command-looking segments. Each match is treated as one command line.
-                var commandRegex = new System.Text.RegularExpressions.Regex(
-                    @"\[\~[A-Za-z0-9]+\~\][^\r\n]*",
-                    System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
-
-                var whitespaceRegex = new System.Text.RegularExpressions.Regex(
-                    @"[ \t]+",
-                    System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
-
-                var commands = commandRegex.Matches(cleanResponse)
-                    .Select(m =>
-                    {
-                        var cmd = m.Value.Trim();
-
-                        // Collapse extra whitespace but keep the command token intact
-                        cmd = whitespaceRegex.Replace(cmd, " ").Trim();
-
-                        // Ensure it's a single line
-                        cmd = cmd.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
-                            .FirstOrDefault()?.Trim() ?? string.Empty;
-
-                        return cmd;
-                    })
-                    .Where(cmd => !string.IsNullOrWhiteSpace(cmd))
-                    .ToList();
-
-                if (commands.Count == 0)
-                    return;
-
-                // Remove NOOP commands (but still allow other commands in the same response)
-                commands.RemoveAll(cmd => string.Equals(cmd, "[~NOOP~]", StringComparison.OrdinalIgnoreCase));
-
-                if (commands.Count == 0)
-                    return;
-
-                // Update History (store the whole batch as a single assistant turn)
-                if (TryComp<LLMPersonalityComponent>(uid, out var personality))
-                {
-                    var historyEntry = string.Join("\n", commands);
-                    personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", historyEntry));
-
-                    LogConversation(uid, "Context", userPrompt);
-                    LogConversation(uid, "Assistant", historyEntry);
-
-                    // Prune if > 3 messages
-                    if (personality.History.Count > 3)
-                    {
-                        personality.History.RemoveRange(0, personality.History.Count - 3);
-                    }
-                }
-
-                // Execute all commands in order
-                foreach (var cmd in commands)
-                {
-                    ParseAndAct(uid, cmd);
-                }
-            });
+            ProcessLLMDecision(uid, responseText, userPrompt);
         }
         catch (Exception e)
         {
             Logger.Error($"LLM Error: {e.Message}");
+
         }
     }
+
+    public void ProcessLLMDecision(EntityUid uid, string? responseText, string userPrompt)
+    {
+        _taskManager.RunOnMainThread(() =>
+          {
+              if (!Exists(uid)) // Check if entity still exists
+                  return;
+
+              var cleanResponse = (responseText ?? string.Empty).Trim();
+
+              // Extract ALL command-looking segments. Each match is treated as one command line.
+              var commandRegex = new System.Text.RegularExpressions.Regex(
+                  @"\[\~[A-Za-z0-9]+\~\][^\r\n]*",
+                  System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+              var whitespaceRegex = new System.Text.RegularExpressions.Regex(
+                  @"[ \t]+",
+                  System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+              var commands = commandRegex.Matches(cleanResponse)
+                  .Select(m =>
+                  {
+                      var cmd = m.Value.Trim();
+
+                      // Collapse extra whitespace but keep the command token intact
+                      cmd = whitespaceRegex.Replace(cmd, " ").Trim();
+
+                      // Ensure it's a single line
+                      cmd = cmd.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
+                          .FirstOrDefault()?.Trim() ?? string.Empty;
+
+                      return cmd;
+                  })
+                  .Where(cmd => !string.IsNullOrWhiteSpace(cmd))
+                  .ToList();
+
+              if (commands.Count == 0)
+                  return;
+
+              // Remove NOOP commands (but still allow other commands in the same response)
+              commands.RemoveAll(cmd => string.Equals(cmd, "[~NOOP~]", StringComparison.OrdinalIgnoreCase));
+
+              if (commands.Count == 0)
+                  return;
+
+              // Update History (store the whole batch as a single assistant turn)
+              if (TryComp<LLMPersonalityComponent>(uid, out var personality))
+              {
+                  var historyEntry = string.Join("\n", commands);
+                  personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("assistant", historyEntry));
+
+                  LogConversation(uid, "Context", userPrompt);
+                  LogConversation(uid, "Assistant", historyEntry);
+
+                  // Prune if > 3 messages
+                  if (personality.History.Count > 3)
+                  {
+                      personality.History.RemoveRange(0, personality.History.Count - 3);
+                  }
+              }
+
+              // Execute all commands in order
+              foreach (var cmd in commands)
+              {
+                  ParseAndAct(uid, cmd);
+              }
+          });
+    }
+
 
     private void ParseAndAct(EntityUid uid, string command)
     {
