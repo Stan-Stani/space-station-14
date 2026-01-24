@@ -40,7 +40,25 @@
             "cwd": "${workspaceFolder}/Content.YAMLLinter",
             "console": "internalConsole",
             "stopAtEntry": false
-        }
+        },
+        {
+        "name": "Server (Watch)",
+        "type": "coreclr",
+        "request": "launch",
+        "program": "dotnet",
+        "args": [
+            "watch",
+            "run",
+            "--project",
+            "${workspaceFolder}/Content.Server/Content.Server.csproj",
+            "--",
+            "--config-file",
+            "server_config.toml"
+        ],
+        "cwd": "${workspaceFolder}",
+        "console": "integratedTerminal",
+        "stopAtEntry": false
+    }
     ],
     "compounds": [
         {

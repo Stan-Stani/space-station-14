@@ -139,7 +139,16 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
 
         // Need to remove the planning value for execution.
         blackboard.Remove<EntityCoordinates>(NPCBlackboard.OwnerCoordinates);
-        var targetCoordinates = blackboard.GetValue<EntityCoordinates>(TargetKey);
+        var targetCoordinates = new EntityCoordinates();
+
+        try
+        {
+            targetCoordinates = blackboard.GetValue<EntityCoordinates>(TargetKey);
+        } catch (Exception ex)
+        {
+            Console.WriteLine($"lalonde, tried to get non-existant value for {TargetKey}");
+            return;
+        }
         var uid = blackboard.GetValue<EntityUid>(NPCBlackboard.Owner);
 
         // Re-use the path we may have if applicable.

@@ -6,6 +6,31 @@
     - tasks:
         - !type:HTNCompoundTask
           task: MoveToTargetCompound
+    - tasks:
+        - !type:HTNPrimitiveTask
+        # 2. CHECK IF WE HAVE A REACHABLE TARGET
+          preconditions:
+            - !type:ActiveHandFreePrecondition
+            - !type:KeyExistsPrecondition
+              key: PickupTarget
+              # This part of the htn breaks the flow I think
+              # because I don't have that key handled in the llm logic.
+              # I mean that it doesn't set ActiveHandFree
+          operator: !type:InteractWithOperator
+            targetKey: PickupTarget  # Tells the bot: "Interact with the ID in 'Target'"
+        - !type:HTNPrimitiveTask
+          operator: !type:DeleteKeyOperator
+            key: PickupTarget
+    - tasks:
+        - !type:HTNPrimitiveTask
+          preconditions:
+            - !type:KeyExistsPrecondition
+              key: ShouldDrop
+          operator: !type:DropOperator
+        - !type:HTNPrimitiveTask
+          operator: !type:DeleteKeyOperator
+            key: ShouldDrop
+
 
   # PRIORITY 2: DEFAULT (WANDER)
   # Otherwise, just wander around.
@@ -16,11 +41,11 @@
 - type: htnCompound
   id: MoveToTargetCompound
   branches:
-    - preconditions:
-        - !type:KeyExistsPrecondition
-          key: MovementTarget
-      tasks:
+      - tasks:
         - !type:HTNPrimitiveTask
+          preconditions:
+            - !type:KeyExistsPrecondition
+              key: MovementTarget
           operator: !type:MoveToOperator
             pathfindKey: MovementPathfind
             targetKey: MovementTarget

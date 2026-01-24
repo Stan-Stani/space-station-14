@@ -29,10 +29,11 @@ using Content.Server.Mapping;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Containers;
+using System.Text.RegularExpressions;
 
 namespace Content.Server.LLM;
 
-public sealed class LLMPersonalitySystem : EntitySystem
+public sealed partial class LLMPersonalitySystem : EntitySystem
 {
     [Dependency] private readonly EntityLookupSystem _lookup = default!;
     [Dependency] private readonly NPCSystem _npc = default!;
@@ -43,18 +44,7 @@ public sealed class LLMPersonalitySystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedInteractionSystem _interaction = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
-
-    /// <summary>
-    /// When the NPC is already executing a MoveToOperator that uses MovementTarget, forcing a replan can cause
-    /// the old operator's shutdown to remove MovementTarget after planning but before the new task starts,
-    /// leading to a KeyNotFoundException in MoveToOperator.Startup.
-    ///
-    /// To avoid that without changing the HTN/operator code, we defer setting MovementTarget until it's safe.
-    /// </summary>
-    private readonly Dictionary<EntityUid, EntityCoordinates> _pendingMovementTargets = new();
-
-
-
+     private ISawmill _sawmill = default!;
 
     public override void Initialize()
     {
@@ -74,14 +64,6 @@ public sealed class LLMPersonalitySystem : EntitySystem
         var query = EntityQueryEnumerator<LLMPersonalityComponent, HungerComponent, HTNComponent>();
         while (query.MoveNext(out var uid, out var personality, out var hunger, out var htn))
         {
-            // If we have a deferred MOVE command, apply it once the current operator is no longer
-            // a MoveToOperator that consumes/removes MovementTarget.
-            if (_pendingMovementTargets.TryGetValue(uid, out var pendingTarget) && CanSafelySetMovementTarget(htn))
-            {
-                _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, pendingTarget);
-                _htn.Replan(htn);
-                _pendingMovementTargets.Remove(uid);
-            }
 
             // 2. Update Timers
             personality.TimeSinceLastUpdate += frameTime;
@@ -318,44 +300,81 @@ Vision: {vision}
     }
 
 
-    private void ParseAndAct(EntityUid uid, string command)
+    private void ParseAndAct(EntityUid uid, string commandAndArgs)
     {
-        if (string.IsNullOrWhiteSpace(command)) return;
+        if (string.IsNullOrWhiteSpace(commandAndArgs)) return;
 
-        var parts = command.Split(' ');
-        if (parts[0] == "[~MOVE~]" && parts.Length > 1)
+        var parts = commandAndArgs.Split(' ');
+        if (CommandSyntaxRegex().IsMatch(parts[0]) == false)
         {
-            if (int.TryParse(parts[1], out int targetIdVal))
-            {
-                var target = new EntityUid(targetIdVal);
-                if (Exists(target))
-                {
-                    var targetCoords = _transform.GetMoverCoordinates(target);
-
-                    // If we're currently executing a MoveToOperator that uses MovementTarget,
-                    // setting the key + forcing a replan can crash later during plan swap.
-                    // Defer until it's safe.
-                    if (TryComp<HTNComponent>(uid, out var htn) && !CanSafelySetMovementTarget(htn))
-                    {
-                        _pendingMovementTargets[uid] = targetCoords;
-                        return;
-                    }
-
-                    _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
-
-                    // Force replan to pick up the new blackboard value immediately
-                    if (TryComp<HTNComponent>(uid, out var htn2))
-                    {
-                        _htn.Replan(htn2);
-                    }
-                }
-            }
+            _sawmill.Warning($"Invalid command format: {commandAndArgs}");
+            return;
         }
-        else if (parts[0] == "[~SPEAK~]" && parts.Length > 1)
-        {
-            // Reconstruct the message (it might have spaces)
-            var message = string.Join(" ", parts.Skip(1)).Trim('"');
-            _chat.TrySendInGameICMessage(uid, message, InGameICChatType.Speak, false);
+
+        string command = parts[0].ToUpperInvariant();
+
+        if (parts.Length > 1) {
+            switch (command)
+            {
+                case "[~DROP~]":
+                    _npc.SetBlackboard(uid, "ShouldDrop", true);
+                    break;
+
+                case "[~MOVE~]":
+
+                    if (int.TryParse(parts[1], out int moveTargetIdVal))
+                    {
+                        var target = new EntityUid(moveTargetIdVal);
+                        if (Exists(target))
+                        {
+                            var targetCoords = _transform.GetMoverCoordinates(target);
+
+                            _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
+
+
+
+                            // // Force replan to pick up the new blackboard value immediately
+                            // if (TryComp<HTNComponent>(uid, out var htn2))
+                            // {
+                            //     Console.WriteLine(htn)
+                            //     _htn.Replan(htn2);
+                            // }
+                        }
+                        Console.WriteLine("lalonde, weird no exist");
+                    }
+
+                    break;
+
+                case "[~NOOP~]":
+                    // Do nothing
+                    break;
+
+                case "[~PICKUP~]":
+                    if (int.TryParse(parts[1], out int pickupTargetIdVal))
+                    {
+                        var target = new EntityUid(pickupTargetIdVal);
+                        if (Exists(target))
+                        {
+                            _npc.SetBlackboard(uid, "PickupTarget", target);
+
+
+
+
+                            // // Force replan to pick up the new blackboard value immediately
+                            if (TryComp<HTNComponent>(uid, out var htn2))
+                            {
+                                _htn.Replan(htn2);
+                            }
+                        }
+                    }
+                    break;
+
+                case "[~SPEAK~]":
+                    // Reconstruct the message (it might have spaces)
+                    var message = string.Join(" ", parts.Skip(1)).Trim('"');
+                    _chat.TrySendInGameICMessage(uid, message, InGameICChatType.Speak, false);
+                    break;
+            }
         }
     }
 
@@ -441,5 +460,8 @@ Vision: {vision}
 
         return !string.Equals(move.TargetKey, NPCBlackboard.MovementTarget, StringComparison.Ordinal);
     }
+
+    [GeneratedRegex(@"^\[\~[A-Za-z0-9]+\~\]$")]
+    private static partial Regex CommandSyntaxRegex();
 }
 

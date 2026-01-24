@@ -10,6 +10,9 @@ using Robust.Shared.Utility;
 
 namespace Content.Server.NPC;
 
+#pragma warning disable IDE0055
+
+
 [DataDefinition]
 public sealed partial class NPCBlackboard : IEnumerable<KeyValuePair<string, object>>
 {
