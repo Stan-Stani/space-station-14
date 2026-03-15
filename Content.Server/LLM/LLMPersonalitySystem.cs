@@ -231,8 +231,7 @@ public sealed partial class LLMPersonalitySystem : EntitySystem
                 ? $"\nPersonality: {personality.Personality}"
                 : "";
 
-            var systemPrompt = $@"/no_think
-You are an NPC in Space Station 14.{personalityPrompt}
+            var systemPrompt = $@"You are an NPC in Space Station 14.{personalityPrompt}
 IMPORTANT: If someone spoke to you, ALWAYS reply with [~SPEAK~] first.
 Commands:
 [~SPEAK~] <Message> — say something. Use this to reply when spoken to.
