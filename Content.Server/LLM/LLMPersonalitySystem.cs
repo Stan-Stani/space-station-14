@@ -58,6 +58,10 @@ public sealed partial class LLMPersonalitySystem : EntitySystem
         @"[ \t]+",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    private static readonly Regex ThinkBlockRegex = new(
+        @"<think>[\s\S]*?</think>",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public override void Initialize()
     {
         base.Initialize();
@@ -227,16 +231,17 @@ public sealed partial class LLMPersonalitySystem : EntitySystem
                 ? $"\nPersonality: {personality.Personality}"
                 : "";
 
-            var systemPrompt = $@"You are an NPC in Space Station 14.
-Your goal is to survive and satisfy your needs.{personalityPrompt}
-Available Commands:
-- [~NOOP~] (do nothing)
-- [~MOVE~] <TargetID> (walk to an entity without interacting)
-- [~INTERACT~] <TargetID> (move to entity and interact — picks up items, uses held item on target, opens doors, etc.)
-- [~USE~] (activate the item in your hand — eat food, turn on flashlight, etc.)
-- [~DROP~] (drop the item in your active hand)
-- [~SPEAK~] <Message> (e.g., [~SPEAK~] ""Hello there!"")
-You can chain multiple commands. Respond with ONLY commands.";
+            var systemPrompt = $@"/no_think
+You are an NPC in Space Station 14.{personalityPrompt}
+IMPORTANT: If someone spoke to you, ALWAYS reply with [~SPEAK~] first.
+Commands:
+[~SPEAK~] <Message> — say something. Use this to reply when spoken to.
+[~INTERACT~] <TargetID> — move to entity and interact (pick up, open door, use item on target).
+[~MOVE~] <TargetID> — walk to entity without interacting.
+[~USE~] — activate held item (eat food, turn on flashlight).
+[~DROP~] — drop held item.
+[~NOOP~] — do nothing.
+You can chain commands. Respond with ONLY commands.";
 
             var userPrompt = $@"
 Status: {status}
@@ -287,7 +292,10 @@ Inventory: {inventory}
               if (!Exists(uid)) // Check if entity still exists
                   return;
 
-              var cleanResponse = (responseText ?? string.Empty).Trim();
+              var rawResponse = (responseText ?? string.Empty).Trim();
+
+              // Strip Qwen 3 <think>...</think> blocks if present
+              var cleanResponse = ThinkBlockRegex.Replace(rawResponse, "").Trim();
 
               var commands = CommandExtractRegex.Matches(cleanResponse)
                   .Select(m =>
