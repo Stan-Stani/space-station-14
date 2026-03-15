@@ -25,6 +25,8 @@ using Content.Shared.Body.Components;
 using Content.Shared.Body.Organ;
 using Content.Shared.Humanoid;
 using Content.Shared.Mobs;
+using Content.Shared.Hands.EntitySystems;
+using Content.Shared.Hands.Components;
 using Content.Server.Mapping;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -44,15 +46,25 @@ public sealed partial class LLMPersonalitySystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedInteractionSystem _interaction = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
-     private ISawmill _sawmill = default!;
+    [Dependency] private readonly SharedHandsSystem _hands = default!;
+    [Dependency] private readonly ILogManager _logManager = default!;
+    private ISawmill _sawmill = default!;
+
+    private static readonly Regex CommandExtractRegex = new(
+        @"\[\~[A-Za-z0-9]+\~\][^\r\n]*",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex WhitespaceCollapseRegex = new(
+        @"[ \t]+",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public override void Initialize()
     {
         base.Initialize();
+        _sawmill = _logManager.GetSawmill("llm");
         SubscribeLocalEvent<EntitySpokeEvent>(OnEntitySpoke);
     }
 
-    // 1. Define the timer variables
     // 1. Define the timer constants
     private const float BackgroundUpdateInterval = 60.0f; // Run every 60 seconds if no speech
     private const float SpeechDebounceTime = 5.0f; // Wait 5 seconds after speech before triggering
@@ -91,24 +103,33 @@ public sealed partial class LLMPersonalitySystem : EntitySystem
             // 3. Trigger Logic
             if (triggerUpdate)
             {
+                if (personality.PendingLLMRequest)
+                    continue;
+
                 personality.TimeSinceLastUpdate = 0f; // Reset background timer
 
                 // --- EXPENSIVE LOGIC STARTS HERE ---
                 // 1. Gather Sensory Data
-                var status = $"I am feeling {hunger.CurrentThreshold}.";
+                var hungerStatus = $"I am feeling {hunger.CurrentThreshold}.";
+
+                // Health state
+                string healthStatus = "healthy";
+                if (TryComp<MobStateComponent>(uid, out var mobState))
+                {
+                    healthStatus = mobState.CurrentState switch
+                    {
+                        MobState.Alive => "healthy",
+                        MobState.Critical => "critical",
+                        MobState.Dead => "dead",
+                        _ => "unknown"
+                    };
+                }
+                var status = $"{hungerStatus} I am {healthStatus}.";
 
                 var visibleEntities = new List<string>();
 
                 // Get all entities in range
                 var entities = _lookup.GetEntitiesInRange(uid, 10f);
-
-                // Filter and Sort Entities
-                var personEntities = entities
-                    .Where(e => e != uid) // Don't see self
-                    .Where(IsEntityAlive); // Must be alive
-                    // .Where(e => _interaction.InRangeUnobstructed(uid, e, 10f)) // Must be visible (LOS)
-                    // .OrderBy(e => _transform.GetWorldPosition(e).LengthSquared()) // Closest first (approx)
-                    // .Take(20); // Limit to 20
 
                 // Filter and Sort Entities
                 var salientEntities = entities
@@ -142,64 +163,85 @@ public sealed partial class LLMPersonalitySystem : EntitySystem
                     ? "I can see: " + string.Join(", ", visibleEntities)
                     : "I can see nothing.";
 
+                // Inventory context
+                var inventoryText = GetInventoryText(uid);
+
                 // 2. Clone history for async use (Snapshot)
                 var historySnapshot = new List<LLMPersonalityComponent.PersonalityChatMessage>(personality.History);
 
                 // 3. Send to LLM endpoint
-                GetAndProcessLLMDecision(uid, status, visionText, historySnapshot);
+                personality.PendingLLMRequest = true;
+                GetAndProcessLLMDecision(uid, personality, status, visionText, inventoryText, historySnapshot);
             }
         }
     }
 
+    private string GetInventoryText(EntityUid uid)
+    {
+        if (!TryComp<HandsComponent>(uid, out var handsComp))
+            return "Inventory: no hands.";
+
+        var items = new List<string>();
+        foreach (var handName in handsComp.SortedHands)
+        {
+            var heldItem = _hands.GetHeldItem((uid, handsComp), handName);
+            if (heldItem != null)
+                items.Add($"{Name(heldItem.Value)} ({handName} hand)");
+            else
+                items.Add($"nothing ({handName} hand)");
+        }
+
+        if (items.Count == 0)
+            return "Inventory: no hands.";
+
+        return "I am holding: " + string.Join(", ", items);
+    }
+
     public bool IsEntityAlive(EntityUid entityUid)
     {
-        // Try to get the MobStateComponent. If the entity doesn't have it, it's likely not a "living" entity in the traditional sense (e.g., a wall, a tool).
         if (EntityManager.TryGetComponent<MobStateComponent>(entityUid, out var mobState))
         {
-            // Check the specific state provided by the component.
-            // The exact enum value might be different, but typically it is something like MobState.Alive or similar.
             return mobState.CurrentState == MobState.Alive;
         }
 
-        // If it doesn't have a MobStateComponent, we assume it's not a living thing that can be "dead" or "alive" in the game's context.
         return false;
     }
 
     /// <summary>
     /// Not in inventory etc
     /// </summary>
-    /// <param name="entityUid"></param>
-    /// <returns></returns>
     public bool IsEntityInWorld(EntityUid entityUid)
     {
-
-        // Returns true if the entity is inside ANY container
-        // (backpack, player hands, locker, etc.)
         if (_container.IsEntityInContainer(entityUid))
             return false;
 
-        // If it's not in a container, it's usually on the floor (parented to a Grid)
         return true;
-
     }
 
 
-    private async void GetAndProcessLLMDecision(EntityUid uid, string status, string vision, List<LLMPersonalityComponent.PersonalityChatMessage> history)
+    private async void GetAndProcessLLMDecision(EntityUid uid, LLMPersonalityComponent personality, string status, string vision, string inventory, List<LLMPersonalityComponent.PersonalityChatMessage> history)
     {
         try
         {
-            var systemPrompt = @"
-You are an NPC in Space Station 14.
-Your goal is to survive and satisfy your needs.
+            var personalityPrompt = !string.IsNullOrWhiteSpace(personality.Personality)
+                ? $"\nPersonality: {personality.Personality}"
+                : "";
+
+            var systemPrompt = $@"You are an NPC in Space Station 14.
+Your goal is to survive and satisfy your needs.{personalityPrompt}
 Available Commands:
-- [~NOOP~]
-- [~MOVE~] <TargetID> (e.g., [~MOVE~] 123)
+- [~NOOP~] (do nothing)
+- [~MOVE~] <TargetID> (walk to an entity without interacting)
+- [~INTERACT~] <TargetID> (move to entity and interact — picks up items, uses held item on target, opens doors, etc.)
+- [~USE~] (activate the item in your hand — eat food, turn on flashlight, etc.)
+- [~DROP~] (drop the item in your active hand)
 - [~SPEAK~] <Message> (e.g., [~SPEAK~] ""Hello there!"")
-Respond with ONLY the command.
-";
+You can chain multiple commands. Respond with ONLY commands.";
+
             var userPrompt = $@"
-Status: {status}`
+Status: {status}
 Vision: {vision}
+Inventory: {inventory}
 ";
 
             // Build full message chain
@@ -227,7 +269,14 @@ Vision: {vision}
         catch (Exception e)
         {
             Logger.Error($"LLM Error: {e.Message}");
-
+        }
+        finally
+        {
+            _taskManager.RunOnMainThread(() =>
+            {
+                if (TryComp<LLMPersonalityComponent>(uid, out var comp))
+                    comp.PendingLLMRequest = false;
+            });
         }
     }
 
@@ -240,22 +289,13 @@ Vision: {vision}
 
               var cleanResponse = (responseText ?? string.Empty).Trim();
 
-              // Extract ALL command-looking segments. Each match is treated as one command line.
-              var commandRegex = new System.Text.RegularExpressions.Regex(
-                  @"\[\~[A-Za-z0-9]+\~\][^\r\n]*",
-                  System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
-
-              var whitespaceRegex = new System.Text.RegularExpressions.Regex(
-                  @"[ \t]+",
-                  System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
-
-              var commands = commandRegex.Matches(cleanResponse)
+              var commands = CommandExtractRegex.Matches(cleanResponse)
                   .Select(m =>
                   {
                       var cmd = m.Value.Trim();
 
                       // Collapse extra whitespace but keep the command token intact
-                      cmd = whitespaceRegex.Replace(cmd, " ").Trim();
+                      cmd = WhitespaceCollapseRegex.Replace(cmd, " ").Trim();
 
                       // Ensure it's a single line
                       cmd = cmd.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
@@ -313,68 +353,61 @@ Vision: {vision}
 
         string command = parts[0].ToUpperInvariant();
 
-        if (parts.Length > 1) {
-            switch (command)
-            {
-                case "[~DROP~]":
-                    _npc.SetBlackboard(uid, "ShouldDrop", true);
-                    break;
+        switch (command)
+        {
+            case "[~DROP~]":
+                _npc.SetBlackboard(uid, "ShouldDrop", true);
+                if (TryComp<HTNComponent>(uid, out var dropHtn))
+                    _htn.Replan(dropHtn);
+                break;
 
-                case "[~MOVE~]":
+            case "[~NOOP~]":
+                break;
 
-                    if (int.TryParse(parts[1], out int moveTargetIdVal))
+            case "[~MOVE~]":
+                if (parts.Length < 2) break;
+                if (int.TryParse(parts[1], out int moveTargetIdVal))
+                {
+                    var target = new EntityUid(moveTargetIdVal);
+                    if (Exists(target))
                     {
-                        var target = new EntityUid(moveTargetIdVal);
-                        if (Exists(target))
-                        {
-                            var targetCoords = _transform.GetMoverCoordinates(target);
+                        if (TryComp<HTNComponent>(uid, out var moveHtn) && !CanSafelySetMovementTarget(moveHtn))
+                            break;
 
-                            _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
-
-
-
-                            // // Force replan to pick up the new blackboard value immediately
-                            // if (TryComp<HTNComponent>(uid, out var htn2))
-                            // {
-                            //     Console.WriteLine(htn)
-                            //     _htn.Replan(htn2);
-                            // }
-                        }
-                        Console.WriteLine("lalonde, weird no exist");
+                        var targetCoords = _transform.GetMoverCoordinates(target);
+                        _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
                     }
+                }
+                break;
 
-                    break;
-
-                case "[~NOOP~]":
-                    // Do nothing
-                    break;
-
-                case "[~PICKUP~]":
-                    if (int.TryParse(parts[1], out int pickupTargetIdVal))
+            case "[~INTERACT~]":
+                if (parts.Length < 2) break;
+                if (int.TryParse(parts[1], out int interactId))
+                {
+                    var target = new EntityUid(interactId);
+                    if (Exists(target))
                     {
-                        var target = new EntityUid(pickupTargetIdVal);
-                        if (Exists(target))
-                        {
-                            _npc.SetBlackboard(uid, "PickupTarget", target);
-
-
-
-
-                            // // Force replan to pick up the new blackboard value immediately
-                            if (TryComp<HTNComponent>(uid, out var htn2))
-                            {
-                                _htn.Replan(htn2);
-                            }
-                        }
+                        var targetCoords = _transform.GetMoverCoordinates(target);
+                        _npc.SetBlackboard(uid, "InteractTarget", target);
+                        _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
+                        if (TryComp<HTNComponent>(uid, out var htn))
+                            _htn.Replan(htn);
                     }
-                    break;
+                }
+                break;
 
-                case "[~SPEAK~]":
-                    // Reconstruct the message (it might have spaces)
-                    var message = string.Join(" ", parts.Skip(1)).Trim('"');
-                    _chat.TrySendInGameICMessage(uid, message, InGameICChatType.Speak, false);
-                    break;
-            }
+            case "[~USE~]":
+                if (_hands.TryGetActiveItem(uid, out var heldEntity))
+                {
+                    _interaction.UseInHandInteraction(uid, heldEntity.Value);
+                }
+                break;
+
+            case "[~SPEAK~]":
+                if (parts.Length < 2) break;
+                var message = string.Join(" ", parts.Skip(1)).Trim('"');
+                _chat.TrySendInGameICMessage(uid, message, InGameICChatType.Speak, false);
+                break;
         }
     }
 
@@ -391,11 +424,11 @@ Vision: {vision}
             {
                 var speakerName = Name(args.Source);
                 var speakerUid = args.Source;
-                var message = args.Message;
+                var speechMessage = args.Message;
 
                 // Add to history
-                personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}[{speakerUid}]] {message}"));
-                LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}[{speakerUid}]] {message}");
+                personality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage("user", $"[Speaker: {speakerName}[{speakerUid}]] {speechMessage}"));
+                LogConversation(uid, "User (Heard)", $"[Speaker: {speakerName}[{speakerUid}]] {speechMessage}");
 
                 // Prune if needed
                 if (personality.History.Count > 10)
@@ -464,4 +497,3 @@ Vision: {vision}
     [GeneratedRegex(@"^\[\~[A-Za-z0-9]+\~\]$")]
     private static partial Regex CommandSyntaxRegex();
 }
-

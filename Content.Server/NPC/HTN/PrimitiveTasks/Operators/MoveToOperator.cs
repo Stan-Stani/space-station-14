@@ -144,9 +144,8 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
         try
         {
             targetCoordinates = blackboard.GetValue<EntityCoordinates>(TargetKey);
-        } catch (Exception ex)
+        } catch (Exception)
         {
-            Console.WriteLine($"lalonde, tried to get non-existant value for {TargetKey}");
             return;
         }
         var uid = blackboard.GetValue<EntityUid>(NPCBlackboard.Owner);

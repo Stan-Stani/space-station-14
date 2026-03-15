@@ -1,26 +1,26 @@
 - type: htnCompound
   id: LLManCompound
   branches:
-    # PRIORITY 1: LLM COMMANDS
-    # If the LLM set a target, go there.
+    # PRIORITY 1: INTERACT — move to target and interact with it
+    - tasks:
+        - !type:HTNPrimitiveTask
+          preconditions:
+            - !type:KeyExistsPrecondition
+              key: InteractTarget
+          operator: !type:MoveToOperator
+            pathfindKey: MovementPathfind
+            targetKey: MovementTarget
+        - !type:HTNPrimitiveTask
+          operator: !type:InteractWithOperator
+            targetKey: InteractTarget
+        - !type:HTNPrimitiveTask
+          operator: !type:DeleteKeyOperator
+            key: InteractTarget
+    # PRIORITY 2: MOVE — just walk to a location
     - tasks:
         - !type:HTNCompoundTask
           task: MoveToTargetCompound
-    - tasks:
-        - !type:HTNPrimitiveTask
-        # 2. CHECK IF WE HAVE A REACHABLE TARGET
-          preconditions:
-            - !type:ActiveHandFreePrecondition
-            - !type:KeyExistsPrecondition
-              key: PickupTarget
-              # This part of the htn breaks the flow I think
-              # because I don't have that key handled in the llm logic.
-              # I mean that it doesn't set ActiveHandFree
-          operator: !type:InteractWithOperator
-            targetKey: PickupTarget  # Tells the bot: "Interact with the ID in 'Target'"
-        - !type:HTNPrimitiveTask
-          operator: !type:DeleteKeyOperator
-            key: PickupTarget
+    # PRIORITY 3: DROP
     - tasks:
         - !type:HTNPrimitiveTask
           preconditions:
@@ -31,9 +31,7 @@
           operator: !type:DeleteKeyOperator
             key: ShouldDrop
 
-
-  # PRIORITY 2: DEFAULT (WANDER)
-  # Otherwise, just wander around.
+  # NO IDLE FALLBACK — NPC stands still when no commands
   # - tasks:
   #   - !type:HTNCompoundTask
   #     task: IdleCompound

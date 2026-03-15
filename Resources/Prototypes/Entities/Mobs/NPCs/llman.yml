@@ -14,6 +14,7 @@
       MinimumIdleTime: !type:Single 1
       MaximumIdleTime: !type:Single 5
   - type: LLMPersonality
+    personality: "You are a curious and friendly space station crew member. You like to explore and help others."
   - type: InputMover
   - type: MobMover
   - type: CombatMode

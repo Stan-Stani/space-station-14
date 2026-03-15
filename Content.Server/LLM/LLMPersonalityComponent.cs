@@ -11,8 +11,8 @@ public sealed partial class LLMPersonalityComponent : Component
     public List<PersonalityChatMessage> History = new();
 
     /// <summary>
-    /// Timer for buffering speech inputs. 
-    /// When > 0, we are waiting for silence. 
+    /// Timer for buffering speech inputs.
+    /// When > 0, we are waiting for silence.
     /// When it hits 0, we trigger an update.
     /// </summary>
     [DataField("speechDebounceTimer")]
@@ -24,6 +24,17 @@ public sealed partial class LLMPersonalityComponent : Component
     /// </summary>
     [DataField("timeSinceLastUpdate")]
     public float TimeSinceLastUpdate = 0f;
+
+    /// <summary>
+    /// Guards against concurrent LLM requests for this entity.
+    /// </summary>
+    public bool PendingLLMRequest;
+
+    /// <summary>
+    /// Optional personality description interpolated into the system prompt.
+    /// </summary>
+    [DataField("personality")]
+    public string Personality = string.Empty;
 
     [DataDefinition]
     public partial struct PersonalityChatMessage
