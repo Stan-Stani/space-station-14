@@ -394,6 +394,18 @@ Inventory: {inventory}
                     var target = new EntityUid(interactId);
                     if (Exists(target))
                     {
+                        // Warn the LLM if the target has a UI panel it can't use
+                        if (HasComp<ActivatableUIComponent>(target))
+                        {
+                            var targetName = Name(target);
+                            if (TryComp<LLMPersonalityComponent>(uid, out var interactPersonality))
+                            {
+                                interactPersonality.History.Add(new LLMPersonalityComponent.PersonalityChatMessage(
+                                    "user",
+                                    $"[System] You interacted with {targetName} (ID: {target}), but it opened a control panel interface that you cannot use. You can only interact with simple objects like items, doors, and food."));
+                            }
+                        }
+
                         var targetCoords = _transform.GetMoverCoordinates(target);
                         _npc.SetBlackboard(uid, "InteractTarget", target);
                         _npc.SetBlackboard(uid, NPCBlackboard.MovementTarget, targetCoords);
